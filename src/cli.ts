@@ -1,0 +1,231 @@
+#!/usr/bin/env node
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+	Command,
+	CommanderError,
+	InvalidArgumentError,
+	Option,
+} from "commander";
+import { loadConfig } from "./config/config.ts";
+import { executeDoctor, executeProviders } from "./core/diagnostics.ts";
+import { asWebAccessError, WebAccessError } from "./core/errors.ts";
+import { errorEnvelope, executeExtract, executeSearch } from "./core/router.ts";
+import type {
+	ExtractRequest,
+	OutputEnvelope,
+	SearchFreshness,
+	SearchRequest,
+} from "./core/types.ts";
+import { normalizeDomains } from "./providers/common.ts";
+
+interface GlobalOptions {
+	config?: string;
+	pretty?: boolean;
+}
+
+function collect(value: string, previous: string[]): string[] {
+	return [...previous, value];
+}
+
+function integer(value: string): number {
+	const parsed = Number(value);
+	if (!Number.isSafeInteger(parsed) || parsed < 1)
+		throw new InvalidArgumentError("必须是大于 0 的整数");
+	return parsed;
+}
+
+function httpUrl(value: string): string {
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		throw new WebAccessError("invalid_input", "url 必须是合法的绝对 URL");
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:")
+		throw new WebAccessError("invalid_input", "url 必须使用 http 或 https");
+	return url.toString();
+}
+
+function exitCode(envelope: OutputEnvelope): number {
+	if (envelope.ok) return 0;
+	if (envelope.error.code === "aborted") return 130;
+	if (
+		[
+			"invalid_input",
+			"config_error",
+			"provider_unknown",
+			"provider_disabled",
+		].includes(envelope.error.code)
+	)
+		return 2;
+	return 1;
+}
+
+function writeEnvelope(envelope: OutputEnvelope, pretty: boolean): void {
+	process.stdout.write(
+		`${JSON.stringify(envelope, null, pretty ? 2 : undefined)}\n`,
+	);
+}
+
+export function createProgram(
+	run: (task: () => Promise<OutputEnvelope> | OutputEnvelope) => void,
+): Command {
+	const program = new Command();
+	program
+		.name("web-access")
+		.description("Agent-neutral 的网页搜索与内容提取 CLI")
+		.version("0.1.0")
+		.option("--config <path>", "指定 JSON 配置文件")
+		.option("--pretty", "格式化 JSON 输出", false)
+		.showSuggestionAfterError();
+	program.configureOutput({ writeErr: () => {}, outputError: () => {} });
+	program.exitOverride();
+
+	program
+		.command("search")
+		.description("搜索网页")
+		.argument("<query>", "搜索关键词")
+		.option("-p, --provider <id>", "provider instance id，或 auto", "auto")
+		.option("-l, --limit <number>", "结果数量（1-20）", integer)
+		.addOption(
+			new Option("--freshness <window>", "时间范围").choices([
+				"day",
+				"month",
+				"year",
+			]),
+		)
+		.option("--include-domain <domain>", "仅包含域名，可重复", collect, [])
+		.option("--exclude-domain <domain>", "排除域名，可重复", collect, [])
+		.option("--timeout <milliseconds>", "总超时毫秒数", integer)
+		.action(
+			(
+				query: string,
+				options: {
+					provider: string;
+					limit?: number;
+					freshness?: SearchFreshness;
+					includeDomain: string[];
+					excludeDomain: string[];
+					timeout?: number;
+				},
+			) => {
+				run(async () => {
+					const globals = program.opts<GlobalOptions>();
+					const loaded = loadConfig(globals.config);
+					const request: SearchRequest = {
+						query: query.trim(),
+						provider: options.provider.toLowerCase(),
+						limit: options.limit ?? loaded.app.search.limit,
+						freshness: options.freshness,
+						includeDomains: normalizeDomains(options.includeDomain),
+						excludeDomains: normalizeDomains(options.excludeDomain),
+						timeoutMs: options.timeout,
+					};
+					if (!request.query)
+						throw new WebAccessError("invalid_input", "query 不能为空");
+					if (request.limit > 20)
+						throw new WebAccessError("invalid_input", "limit 不能超过 20");
+					return executeSearch(request, {
+						loaded,
+						signal: processSignal.signal,
+					});
+				});
+			},
+		);
+
+	program
+		.command("extract")
+		.description("提取网页正文并转换为 Markdown")
+		.argument("<url>", "HTTP(S) URL")
+		.option("-p, --provider <id>", "provider instance id，或 auto", "auto")
+		.option("--timeout <milliseconds>", "总超时毫秒数", integer)
+		.action((url: string, options: { provider: string; timeout?: number }) => {
+			run(async () => {
+				const globals = program.opts<GlobalOptions>();
+				const loaded = loadConfig(globals.config);
+				const request: ExtractRequest = {
+					url: httpUrl(url),
+					provider: options.provider.toLowerCase(),
+					timeoutMs: options.timeout,
+				};
+				return executeExtract(request, {
+					loaded,
+					signal: processSignal.signal,
+				});
+			});
+		});
+
+	program
+		.command("providers")
+		.description("列出 provider instance、route 与配置状态")
+		.action(() =>
+			run(() =>
+				executeProviders(loadConfig(program.opts<GlobalOptions>().config)),
+			),
+		);
+
+	program
+		.command("doctor")
+		.description("检查本地配置与已启用 provider 的可用性")
+		.action(() =>
+			run(() =>
+				executeDoctor(loadConfig(program.opts<GlobalOptions>().config)),
+			),
+		);
+
+	return program;
+}
+
+const processSignal = new AbortController();
+process.once("SIGINT", () => processSignal.abort());
+
+async function main(): Promise<void> {
+	let pending: Promise<OutputEnvelope> | undefined;
+	const program = createProgram((task) => {
+		pending = Promise.resolve().then(task);
+	});
+	if (process.argv.length <= 2) {
+		const envelope = errorEnvelope(
+			new WebAccessError("invalid_input", "必须指定命令"),
+		);
+		writeEnvelope(envelope, false);
+		process.exitCode = 2;
+		return;
+	}
+	try {
+		await program.parseAsync(process.argv);
+		if (!pending) throw new WebAccessError("invalid_input", "必须指定命令");
+		const envelope = await pending;
+		writeEnvelope(envelope, !!program.opts<GlobalOptions>().pretty);
+		process.exitCode = exitCode(envelope);
+	} catch (caught) {
+		if (
+			caught instanceof CommanderError &&
+			caught.code === "commander.helpDisplayed"
+		)
+			return;
+		if (caught instanceof CommanderError && caught.code === "commander.version")
+			return;
+		const command = program.args[0];
+		const normalized =
+			caught instanceof CommanderError
+				? new WebAccessError("invalid_input", caught.message)
+				: asWebAccessError(caught);
+		const envelope = errorEnvelope(
+			normalized,
+			["search", "extract", "providers", "doctor"].includes(command)
+				? (command as "search" | "extract" | "providers" | "doctor")
+				: null,
+		);
+		writeEnvelope(envelope, !!program.opts<GlobalOptions>().pretty);
+		process.exitCode = exitCode(envelope);
+	}
+}
+
+if (
+	process.argv[1] &&
+	import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+) {
+	await main();
+}

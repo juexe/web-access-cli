@@ -1,0 +1,57 @@
+{
+  "type": "object",
+  "required": [
+    "query",
+    "provider",
+    "limit",
+    "includeDomains",
+    "excludeDomains"
+  ],
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    },
+    "freshness": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "day"
+        },
+        {
+          "type": "string",
+          "const": "month"
+        },
+        {
+          "type": "string",
+          "const": "year"
+        }
+      ]
+    },
+    "includeDomains": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "excludeDomains": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "timeoutMs": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

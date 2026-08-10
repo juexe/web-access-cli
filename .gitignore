@@ -1,0 +1,44 @@
+# 依赖与包管理器缓存
+/node_modules/
+/.pnpm-store/
+
+# 构建、测试与打包产物
+/dist/
+/coverage/
+/.nyc_output/
+/.artifacts/
+*.tsbuildinfo
+
+# 本地配置与敏感信息
+.env
+.env.*
+!.env.example
+!.env.*.example
+/config.local.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# 日志、缓存与临时文件
+*.log
+*.log.*
+*.pid
+/.cache/
+/.tmp/
+/tmp/
+
+# 编辑器与操作系统文件
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*~
+
+# 本地只读上游参考目录
+/temp/
+/docs/
+AGENTS.md
+CONTEXT.md

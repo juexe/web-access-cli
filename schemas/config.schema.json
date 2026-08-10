@@ -1,0 +1,143 @@
+{
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "format": "uri-reference"
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "tavily"
+              },
+              {
+                "type": "string",
+                "const": "exa"
+              },
+              {
+                "type": "string",
+                "const": "brave"
+              },
+              {
+                "type": "string",
+                "const": "searxng"
+              },
+              {
+                "type": "string",
+                "const": "firecrawl"
+              },
+              {
+                "type": "string",
+                "const": "jina"
+              },
+              {
+                "type": "string",
+                "const": "http"
+              }
+            ]
+          },
+          "apiKey": {
+            "type": "string"
+          },
+          "apiKeyEnv": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "baseUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "baseUrlEnv": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "headers": {
+            "type": "object",
+            "patternProperties": {
+              "^[^\\r\\n]+$": {
+                "type": "string",
+                "pattern": "^[^\\r\\n]*$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "search": {
+      "type": "object",
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          }
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attemptTimeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxResponseBytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "extract": {
+      "type": "object",
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          }
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attemptTimeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxResponseBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minContentCharacters": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,391 @@
+{
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "ok",
+    "command",
+    "durationMs"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "command": {
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "search"
+            },
+            {
+              "type": "string",
+              "const": "extract"
+            },
+            {
+              "type": "string",
+              "const": "providers"
+            },
+            {
+              "type": "string",
+              "const": "doctor"
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "request": {},
+    "provider": {
+      "type": "object",
+      "required": [
+        "id",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "tavily"
+            },
+            {
+              "type": "string",
+              "const": "exa"
+            },
+            {
+              "type": "string",
+              "const": "brave"
+            },
+            {
+              "type": "string",
+              "const": "searxng"
+            },
+            {
+              "type": "string",
+              "const": "firecrawl"
+            },
+            {
+              "type": "string",
+              "const": "jina"
+            },
+            {
+              "type": "string",
+              "const": "http"
+            }
+          ]
+        }
+      }
+    },
+    "attempts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "provider",
+          "status",
+          "durationMs"
+        ],
+        "properties": {
+          "provider": {
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "tavily"
+                  },
+                  {
+                    "type": "string",
+                    "const": "exa"
+                  },
+                  {
+                    "type": "string",
+                    "const": "brave"
+                  },
+                  {
+                    "type": "string",
+                    "const": "searxng"
+                  },
+                  {
+                    "type": "string",
+                    "const": "firecrawl"
+                  },
+                  {
+                    "type": "string",
+                    "const": "jina"
+                  },
+                  {
+                    "type": "string",
+                    "const": "http"
+                  }
+                ]
+              }
+            }
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "success"
+              },
+              {
+                "type": "string",
+                "const": "failed"
+              }
+            ]
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "retryable"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "provider": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "type"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "tavily"
+                      },
+                      {
+                        "type": "string",
+                        "const": "exa"
+                      },
+                      {
+                        "type": "string",
+                        "const": "brave"
+                      },
+                      {
+                        "type": "string",
+                        "const": "searxng"
+                      },
+                      {
+                        "type": "string",
+                        "const": "firecrawl"
+                      },
+                      {
+                        "type": "string",
+                        "const": "jina"
+                      },
+                      {
+                        "type": "string",
+                        "const": "http"
+                      }
+                    ]
+                  }
+                }
+              },
+              "httpStatus": {
+                "type": "integer"
+              },
+              "details": {}
+            }
+          }
+        }
+      }
+    },
+    "data": {},
+    "raw": {},
+    "error": {
+      "type": "object",
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "provider": {
+          "type": "object",
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "tavily"
+                },
+                {
+                  "type": "string",
+                  "const": "exa"
+                },
+                {
+                  "type": "string",
+                  "const": "brave"
+                },
+                {
+                  "type": "string",
+                  "const": "searxng"
+                },
+                {
+                  "type": "string",
+                  "const": "firecrawl"
+                },
+                {
+                  "type": "string",
+                  "const": "jina"
+                },
+                {
+                  "type": "string",
+                  "const": "http"
+                }
+              ]
+            }
+          }
+        },
+        "httpStatus": {
+          "type": "integer"
+        },
+        "details": {}
+      }
+    },
+    "partial": {
+      "type": "object",
+      "required": [
+        "provider",
+        "data",
+        "raw"
+      ],
+      "properties": {
+        "provider": {
+          "type": "object",
+          "required": [
+            "id",
+            "type"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "tavily"
+                },
+                {
+                  "type": "string",
+                  "const": "exa"
+                },
+                {
+                  "type": "string",
+                  "const": "brave"
+                },
+                {
+                  "type": "string",
+                  "const": "searxng"
+                },
+                {
+                  "type": "string",
+                  "const": "firecrawl"
+                },
+                {
+                  "type": "string",
+                  "const": "jina"
+                },
+                {
+                  "type": "string",
+                  "const": "http"
+                }
+              ]
+            }
+          }
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "document"
+          ],
+          "properties": {
+            "document": {
+              "type": "object",
+              "required": [
+                "sourceUrl",
+                "title",
+                "content",
+                "contentType"
+              ],
+              "properties": {
+                "sourceUrl": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string",
+                  "const": "text/markdown"
+                }
+              }
+            }
+          }
+        },
+        "raw": {}
+      }
+    }
+  }
+}

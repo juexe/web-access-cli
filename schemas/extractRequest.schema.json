@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "required": [
+    "url",
+    "provider"
+  ],
+  "properties": {
+    "url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timeoutMs": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}
