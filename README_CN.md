@@ -4,7 +4,7 @@
 
 一个 Agent-neutral 的网页能力 CLI。它把“搜索”和“网页正文提取”定义为稳定能力，把 Tavily、Exa、Brave、SearXNG、Firecrawl、Jina 等差异收敛到内部统一 schema。
 
-CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCode 或其他 Agent。Skill、MCP 和 Agent 插件可以在后续作为 CLI 上层 adapter 接入。
+CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCode 或其他 Agent。Skill、MCP 和 Agent 插件只能作为 CLI 上层 adapter 接入，不能污染核心能力和 Provider 实现。
 
 ## 能力与 provider
 
@@ -75,7 +75,7 @@ web-access providers --pretty
 web-access doctor --pretty
 ```
 
-只有四个命令：`search`、`extract`、`providers`、`doctor`。当前版本不提供 batch/all、answer、PDF 专线、Node SDK、Skill 或 MCP。
+只有四个命令：`search`、`extract`、`providers`、`doctor`。当前版本不提供 batch/all、answer、PDF 专线、Node SDK 或 MCP。仓库提供可选的 [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md)，仅供源码仓库使用，不包含在 npm 发布包中。
 
 ### 通用选项
 
@@ -89,11 +89,7 @@ web-access doctor --pretty
 
 配置是严格 JSON；未知字段会报错。CLI 只读取显式路径或用户级路径，不会向上查找项目目录中的配置文件。
 
-默认路径：
-
-- Windows：`%APPDATA%/web-access/config.json`
-- Linux/macOS：`$XDG_CONFIG_HOME/web-access/config.json`，未设置时为 `~/.config/web-access/config.json`
-- 环境变量 `WEB_ACCESS_CONFIG` 可以指定其他路径；命令行 `--config` 优先级更高。
+所有平台的默认路径均为 `~/.config/web-access-cli/config.json`，其中 `~` 表示当前用户的主目录。环境变量 `WEB_ACCESS_CONFIG` 可以指定其他路径；命令行 `--config` 优先级更高。
 
 完整 JSON Schema 位于 [schemas/config.schema.json](schemas/config.schema.json)。示例：
 

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
 	ConfigError,
+	getDefaultConfigPath,
 	loadConfig,
 	resolveConfigPath,
 } from "../src/config/config.ts";
@@ -62,14 +63,27 @@ test("配置拒绝未知字段与不存在的 route instance", () => {
 test("只读取显式或用户级配置路径", () => {
 	const resolved = resolveConfigPath("./nested/config.json", {});
 	assert.equal(resolved, join(process.cwd(), "nested", "config.json"));
-	const loaded = loadConfig(undefined, {
-		APPDATA: join(tmpdir(), "not-created"),
-	});
-	assert.equal(loaded.exists, false);
-	assert.deepEqual(loaded.app.search.providers, [
-		"tavily",
-		"exa",
-		"brave",
-		"searxng",
-	]);
+	assert.equal(
+		resolveConfigPath(undefined, {
+			WEB_ACCESS_CONFIG: "./env-config.json",
+		}),
+		join(process.cwd(), "env-config.json"),
+	);
+	assert.equal(
+		getDefaultConfigPath(),
+		join(homedir(), ".config", "web-access-cli", "config.json"),
+	);
+	assert.equal(resolveConfigPath(undefined, {}), getDefaultConfigPath());
+	const fixture = configFile({});
+	try {
+		const loaded = loadConfig(fixture.path, {});
+		assert.deepEqual(loaded.app.search.providers, [
+			"tavily",
+			"exa",
+			"brave",
+			"searxng",
+		]);
+	} finally {
+		fixture.cleanup();
+	}
 });

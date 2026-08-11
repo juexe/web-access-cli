@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
 	Command,
@@ -223,9 +223,18 @@ async function main(): Promise<void> {
 	}
 }
 
-if (
-	process.argv[1] &&
-	import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-) {
+export function isMainModule(
+	moduleUrl: string,
+	entryPath: string | undefined,
+): boolean {
+	if (!entryPath) return false;
+	try {
+		return moduleUrl === pathToFileURL(realpathSync(entryPath)).href;
+	} catch {
+		return false;
+	}
+}
+
+if (isMainModule(import.meta.url, process.argv[1])) {
 	await main();
 }

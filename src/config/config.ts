@@ -366,27 +366,15 @@ function validateRoutes(
 	return chosen;
 }
 
-export function getDefaultConfigPath(
-	env: NodeJS.ProcessEnv = process.env,
-): string {
-	if (process.platform === "win32")
-		return join(
-			env.APPDATA || join(homedir(), "AppData", "Roaming"),
-			"web-access",
-			"config.json",
-		);
-	return join(
-		env.XDG_CONFIG_HOME || join(homedir(), ".config"),
-		"web-access",
-		"config.json",
-	);
+export function getDefaultConfigPath(): string {
+	return join(homedir(), ".config", "web-access-cli", "config.json");
 }
 
 export function resolveConfigPath(
 	explicitPath?: string,
 	env: NodeJS.ProcessEnv = process.env,
 ): string {
-	const raw = explicitPath || env[CONFIG_ENV] || getDefaultConfigPath(env);
+	const raw = explicitPath || env[CONFIG_ENV] || getDefaultConfigPath();
 	return isAbsolute(raw) ? raw : resolve(raw);
 }
 

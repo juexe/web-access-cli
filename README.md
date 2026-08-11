@@ -4,7 +4,7 @@ English | [Simplified Chinese](README_CN.md)
 
 An agent-neutral CLI for web capabilities. It defines search and web content extraction as stable capabilities while normalizing differences among Tavily, Exa, Brave, SearXNG, Firecrawl, Jina, and other providers behind a unified internal schema.
 
-The CLI is the primary product interface. It is not tied to Pi, Claude Code, Codex, Cursor, OpenCode, or any other agent. Skills, MCP integrations, and agent plugins can be added later as adapters on top of the CLI.
+The CLI is the primary product interface. It is not tied to Pi, Claude Code, Codex, Cursor, OpenCode, or any other agent. Skills, MCP integrations, and agent plugins may only integrate as adapters on top of the CLI; they must not leak into the core capabilities or provider implementations.
 
 ## Capabilities and providers
 
@@ -75,7 +75,7 @@ web-access providers --pretty
 web-access doctor --pretty
 ```
 
-The CLI provides exactly four commands: `search`, `extract`, `providers`, and `doctor`. The current version does not provide batch/all, answer, a dedicated PDF path, a Node.js SDK, Skills, or MCP integration.
+The CLI provides exactly four commands: `search`, `extract`, `providers`, and `doctor`. The current version does not provide batch/all, answer, a dedicated PDF path, a Node.js SDK, or MCP integration. The repository includes an optional [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md) for source-checkout use; it is not included in the npm package.
 
 ### Global options
 
@@ -89,11 +89,7 @@ Except for help and version output, stdout always contains exactly one JSON enve
 
 Configuration files use strict JSON; unknown fields are rejected. The CLI reads only an explicit path or a user-level path and does not search parent project directories for configuration files.
 
-Default paths:
-
-- Windows: `%APPDATA%/web-access/config.json`
-- Linux/macOS: `$XDG_CONFIG_HOME/web-access/config.json`, or `~/.config/web-access/config.json` when `XDG_CONFIG_HOME` is not set
-- The `WEB_ACCESS_CONFIG` environment variable can select another path. The `--config` command-line option takes precedence.
+The default path on every platform is `~/.config/web-access-cli/config.json`, where `~` is the current user's home directory. The `WEB_ACCESS_CONFIG` environment variable can select another path. The `--config` command-line option takes precedence.
 
 The complete JSON Schema is available at [schemas/config.schema.json](schemas/config.schema.json). Example:
 

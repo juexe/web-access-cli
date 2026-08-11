@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { DefaultHttpTransport } from "../src/transport/http.ts";
 
@@ -99,6 +101,28 @@ test("CLI 自身的参数解析错误不会向 stderr 泄漏文本", () => {
 	};
 	assert.equal(envelope.ok, false);
 	assert.equal(envelope.error?.code, "invalid_input");
+});
+
+test("CLI 通过符号链接入口运行时仍会执行主程序", () => {
+	const directory = mkdtempSync(join(tmpdir(), "web-access-cli-link-"));
+	const repositoryLink = join(directory, "repository");
+	try {
+		symlinkSync(
+			resolve("."),
+			repositoryLink,
+			process.platform === "win32" ? "junction" : "dir",
+		);
+		const result = spawnSync(
+			process.execPath,
+			["--import", "tsx", join(repositoryLink, "src", "cli.ts"), "--version"],
+			{ cwd: resolve("."), encoding: "utf8" },
+		);
+		assert.equal(result.status, 0);
+		assert.equal(result.stderr, "");
+		assert.equal(result.stdout.trim(), "0.1.0");
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
 });
 
 test("生成的 JSON Schema 包含配置、请求与输出 schema", async () => {
