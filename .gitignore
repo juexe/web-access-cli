@@ -37,7 +37,7 @@ Desktop.ini
 *.swp
 *~
 
-# 本地只读上游参考目录
+# 本地项目说明与只读上游参考，不进入公开仓库
 /temp/
 /docs/
 AGENTS.md

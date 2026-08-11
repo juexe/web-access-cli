@@ -1,0 +1,42 @@
+name: Bug 报告
+description: 报告可复现的行为、兼容性或输出问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 提交前请删除 API key、Cookie、Authorization header、私有 URL 和响应正文中的敏感信息。安全漏洞请使用私密报告入口。
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      placeholder: 例如 0.1.0 或提交 SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      placeholder: 例如 Windows 11、Node.js 22.19、pnpm 11.16
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 提供最小命令、已脱敏配置和稳定复现步骤。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 可附上已脱敏的 JSON envelope；不要粘贴真实凭据或隐私数据。
+    validations:
+      required: true

@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 22.19.0
+          - os: ubuntu-latest
+            node: 24.x
+          - os: windows-latest
+            node: 22.19.0
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 运行完整检查
+        run: pnpm check
+      - name: 确认生成 Schema 已提交
+        run: git diff --exit-code -- schemas/
+
+  package:
+    name: Package
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 审计生产依赖
+        run: pnpm audit --prod --audit-level=high
+      - name: 构建并打包
+        run: pnpm pack:check
+      - name: 检查发布清单
+        shell: bash
+        run: |
+          archive="$(find .artifacts -maxdepth 1 -name '*.tgz' -print -quit)"
+          test -n "$archive"
+          contents="$(tar -tf "$archive")"
+          printf '%s\n' "$contents"
+          while IFS= read -r entry; do
+            case "$entry" in
+              package/dist/*|package/schemas/*|package/LICENSE|package/package.json|package/README.md|package/README_CN.md|package/THIRD_PARTY_NOTICES.md) ;;
+              *) printf 'Unexpected package entry: %s\n' "$entry" >&2; exit 1 ;;
+            esac
+          done <<< "$contents"
+          for required in package/dist/cli.js package/schemas/config.schema.json package/schemas/extractRequest.schema.json package/schemas/output.schema.json package/schemas/searchRequest.schema.json package/LICENSE package/package.json package/README.md package/README_CN.md package/THIRD_PARTY_NOTICES.md; do
+            grep -Fxq "$required" <<< "$contents"
+          done

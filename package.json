@@ -3,6 +3,14 @@
 	"version": "0.1.0",
 	"description": "Agent-neutral web search and content extraction CLI",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Juexe/web-access-cli.git"
+	},
+	"homepage": "https://github.com/Juexe/web-access-cli#readme",
+	"bugs": {
+		"url": "https://github.com/Juexe/web-access-cli/issues"
+	},
 	"keywords": [
 		"cli",
 		"web-search",

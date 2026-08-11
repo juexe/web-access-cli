@@ -2,6 +2,9 @@
 
 English | [Simplified Chinese](README_CN.md)
 
+[![CI](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 An agent-neutral CLI for web capabilities. It defines search and web content extraction as stable capabilities while normalizing differences among Tavily, Exa, Brave, SearXNG, Firecrawl, Jina, and other providers behind a unified internal schema.
 
 The CLI is the primary product interface. It is not tied to Pi, Claude Code, Codex, Cursor, OpenCode, or any other agent. Skills, MCP integrations, and agent plugins may only integrate as adapters on top of the CLI; they must not leak into the core capabilities or provider implementations.
@@ -19,18 +22,28 @@ A provider type describes an implementation, while a provider instance is a conf
 
 Node.js 22.19 or later is required.
 
+The npm package has not been published yet. Build and run the CLI from source:
+
 ```sh
-pnpm add --global web-access-cli
+git clone https://github.com/Juexe/web-access-cli.git
+cd web-access-cli
+pnpm install --frozen-lockfile
+pnpm build
+node dist/cli.js --help
+```
+
+After building, an optional global installation can point to the absolute repository path:
+
+```sh
+pnpm add --global <absolute-path-to-web-access-cli>
 web-access --help
 ```
 
 For development in this repository:
 
 ```sh
-pnpm install
 pnpm check
-pnpm build
-node dist/cli.js --help
+pnpm pack:check
 ```
 
 ## Project structure
@@ -43,7 +56,6 @@ src/providers/             Provider adapters, registry, and HTTP/RSC extraction
 src/transport/             Proxies, timeouts, redirects, and response size limits
 schemas/                   Generated JSON Schemas
 test/                      node:test unit tests and local HTTP integration tests
-temp/pi-web-access/        Read-only upstream reference code
 ```
 
 Provider adapters should handle protocol mapping only. Fallback, deadlines, attempts, envelopes, and exit codes are managed centrally by `src/core`. Do not add lifecycle or tool registration code for Pi, Claude Code, Codex, or any other agent to an adapter.
@@ -243,5 +255,7 @@ Exit codes:
 ## Project scope
 
 This project draws heavily from the provider and content extraction implementations in `pi-web-access`, but does not include Pi-specific registration, tool protocols, or UI code.
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request. Report security vulnerabilities privately according to [SECURITY.md](SECURITY.md).
 
 Licensed under MIT. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party and upstream attribution.

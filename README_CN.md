@@ -2,6 +2,9 @@
 
 [English](README.md) | 简体中文
 
+[![CI](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 一个 Agent-neutral 的网页能力 CLI。它把“搜索”和“网页正文提取”定义为稳定能力，把 Tavily、Exa、Brave、SearXNG、Firecrawl、Jina 等差异收敛到内部统一 schema。
 
 CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCode 或其他 Agent。Skill、MCP 和 Agent 插件只能作为 CLI 上层 adapter 接入，不能污染核心能力和 Provider 实现。
@@ -19,18 +22,28 @@ Provider Type 描述实现类型；Provider Instance 是一份可配置实例。
 
 要求 Node.js 22.19 或更高版本。
 
+npm 包尚未发布。当前请从源码构建并运行：
+
 ```sh
-pnpm add --global web-access-cli
+git clone https://github.com/Juexe/web-access-cli.git
+cd web-access-cli
+pnpm install --frozen-lockfile
+pnpm build
+node dist/cli.js --help
+```
+
+构建完成后，也可以使用仓库绝对路径安装为全局命令：
+
+```sh
+pnpm add --global <web-access-cli 仓库绝对路径>
 web-access --help
 ```
 
 在仓库中开发：
 
 ```sh
-pnpm install
 pnpm check
-pnpm build
-node dist/cli.js --help
+pnpm pack:check
 ```
 
 ## 项目结构
@@ -43,7 +56,6 @@ src/providers/             Provider adapter、registry、HTTP/RSC 提取
 src/transport/             代理、超时、重定向和响应大小限制
 schemas/                   构建生成的 JSON Schema
 test/                      node:test 单元测试与本地 HTTP 集成测试
-temp/pi-web-access/        只读的上游参考代码
 ```
 
 Provider adapter 应只负责协议映射；fallback、deadline、attempts、envelope 和退出码由 `src/core` 统一处理。不要在 adapter 中引入 Pi、Claude Code、Codex 或其他 Agent 的生命周期和工具注册代码。
@@ -241,5 +253,7 @@ web-access doctor --pretty
 ## 项目边界
 
 本项目大量参考 `pi-web-access` 的 provider 和内容提取实现，但不包含 Pi-specific 注册、工具协议或 UI 代码。
+
+欢迎贡献。提交 Issue 或 Pull Request 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告。
 
 许可证为 MIT，第三方与上游归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
