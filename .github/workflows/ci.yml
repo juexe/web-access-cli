@@ -33,7 +33,7 @@ jobs:
         with:
           persist-credentials: false
       - name: 安装 pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 11.16.0
       - name: 安装 Node.js
@@ -58,7 +58,7 @@ jobs:
         with:
           persist-credentials: false
       - name: 安装 pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 11.16.0
       - name: 安装 Node.js
