@@ -1,6 +1,6 @@
 # web-access-cli
 
-English | [Simplified Chinese](README_CN.md)
+English | [简体中文](README_CN.md)
 
 [![CI](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
