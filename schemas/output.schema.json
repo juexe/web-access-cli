@@ -33,6 +33,10 @@
             {
               "type": "string",
               "const": "doctor"
+            },
+            {
+              "type": "string",
+              "const": "config.edit"
             }
           ]
         },

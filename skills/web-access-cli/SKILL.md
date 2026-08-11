@@ -108,6 +108,14 @@ web-access doctor
 - `providers` 列出 Instance、能力、Route 启用状态、凭据来源和 base URL 来源。
 - `doctor` 只检查本地配置和已启用 Instance，不发送远端探测请求。它通过不代表远端服务当前可用；启用的 Instance 未完成配置时会返回非零退出码和 `doctor_failed`。
 
+只有用户明确要求初始化或打开配置文件时，才调用系统默认应用：
+
+```sh
+web-access config edit
+```
+
+配置不存在时命令会创建完整默认配置，已存在时不会覆盖或格式化。成功时读取 `data.path` 和 `data.created`。该命令会打开本机应用，不要把它作为常规诊断步骤自动执行。
+
 未显式指定配置时，所有平台均读取 `~/.config/web-access-cli/config.json`，其中 `~` 是当前用户的主目录。
 
 指定配置文件时把全局选项放在子命令前：
@@ -115,6 +123,7 @@ web-access doctor
 ```sh
 web-access --config "/path/to/config.json" providers
 web-access --config "/path/to/config.json" search "query"
+web-access --config "/path/to/config.json" config edit
 ```
 
 详细配置、标准环境变量和自定义 Instance 格式见项目根目录的 [README_CN.md](../../README_CN.md) 与 [config.schema.json](../../schemas/config.schema.json)。未知配置字段会被拒绝；只有写入对应 Route 的 Instance 才会启用。
@@ -141,6 +150,7 @@ web-access --config "/path/to/config.json" search "query"
 ## 失败处理
 
 - `invalid_input`、`config_error`、`provider_unknown`、`provider_disabled`：修正调用或配置，不要原样重试。
+- `open_failed`：配置文件已保留；向用户提供 `error.details.path`，请其手动打开或检查系统文件关联。
 - `auth_error`、`quota_exceeded`：说明需要用户检查凭据或配额；不要索取用户在聊天中粘贴密钥。
 - `rate_limited`、`timeout`、`network_error`、`provider_error` 等：结合 `retryable` 判断。`auto` 通常已完成可用 Route 的回退，不要无限循环重试。
 - `provider_exhausted`：查看 `attempts` 和可选的 `partial`，向用户说明所有可用 Instance 均失败。

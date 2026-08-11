@@ -85,9 +85,12 @@ web-access extract https://example.com/article --provider http --timeout 30000
 
 web-access providers --pretty
 web-access doctor --pretty
+
+web-access config edit
+web-access --config "/path/to/config.json" config edit
 ```
 
-只有四个命令：`search`、`extract`、`providers`、`doctor`。当前版本不提供 batch/all、answer、PDF 专线、Node SDK 或 MCP。仓库提供可选的 [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md)，仅供源码仓库使用，不包含在 npm 发布包中。
+CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两个诊断命令，以及 `config edit` 配置维护命令。当前版本不提供 batch/all、answer、PDF 专线、Node SDK 或 MCP。仓库提供可选的 [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md)，仅供源码仓库使用，不包含在 npm 发布包中。
 
 ### 通用选项
 
@@ -102,6 +105,8 @@ web-access doctor --pretty
 配置是严格 JSON；未知字段会报错。CLI 只读取显式路径或用户级路径，不会向上查找项目目录中的配置文件。
 
 所有平台的默认路径均为 `~/.config/web-access-cli/config.json`，其中 `~` 表示当前用户的主目录。环境变量 `WEB_ACCESS_CONFIG` 可以指定其他路径；命令行 `--config` 优先级更高。
+
+`web-access config edit` 会在配置文件缺失时创建父目录和完整默认配置，再用系统为 JSON 文件关联的默认应用打开；已有文件会原样打开，即使内容暂时不是有效 JSON 也不会被覆盖或格式化。命令只等待系统接受打开请求，不等待编辑器关闭。成功 envelope 的 `data` 包含绝对 `path`、是否新建的 `created` 和 `opened: true`。无法启动默认应用时返回 `open_failed`；如果配置刚刚创建成功，文件仍会保留以便手动打开。
 
 完整 JSON Schema 位于 [schemas/config.schema.json](schemas/config.schema.json)。示例：
 
@@ -236,7 +241,7 @@ web-access doctor --pretty
 
 - `0`：成功
 - `2`：输入、配置、未知或未启用 provider
-- `1`：运行时/provider/doctor 失败
+- `1`：运行时/provider/doctor/默认应用启动失败
 - `130`：用户取消
 
 `providers` 会列出每个 Instance 的 Type、能力、Route 启用状态、凭据来源和 base URL 来源。`doctor` 只做本地配置检查，不主动调用远端 API；当已启用 Route 中存在未配置 Instance 时，命令返回 `doctor_failed` 和退出码 `1`。

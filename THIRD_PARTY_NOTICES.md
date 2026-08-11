@@ -40,6 +40,7 @@ Pi-specific 的工具注册、UI、Agent 生命周期与协议代码没有进入
 - `@mozilla/readability`：Apache-2.0
 - `commander`：MIT
 - `linkedom`：ISC
+- `open`：MIT
 - `turndown`：MIT
 - `typebox`：MIT
 - `undici`：MIT

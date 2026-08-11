@@ -6,6 +6,8 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
+import { createProgram } from "../src/cli.ts";
+import type { OutputEnvelope } from "../src/core/types.ts";
 import { DefaultHttpTransport } from "../src/transport/http.ts";
 
 async function serverUrl(t: TestContext): Promise<string> {
@@ -103,6 +105,83 @@ test("CLI 自身的参数解析错误不会向 stderr 泄漏文本", () => {
 	assert.equal(envelope.error?.code, "invalid_input");
 });
 
+test("CLI 注册 config edit 并向实现转发全局配置路径", async () => {
+	const tasks: Array<() => Promise<OutputEnvelope> | OutputEnvelope> = [];
+	let explicitPath: string | undefined;
+	const program = createProgram((task) => tasks.push(task), {
+		executeConfigEdit: async (options) => {
+			explicitPath = options?.explicitPath;
+			return {
+				schemaVersion: 1,
+				ok: true,
+				command: "config.edit",
+				durationMs: 0,
+				data: {
+					path: resolve("chosen-config.json"),
+					created: true,
+					opened: true,
+				},
+			};
+		},
+	});
+
+	await program.parseAsync([
+		"node",
+		"web-access",
+		"--config",
+		"./chosen-config.json",
+		"config",
+		"edit",
+	]);
+	assert.equal(tasks.length, 1);
+	const envelope = await tasks[0]?.();
+	assert.equal(explicitPath, "./chosen-config.json");
+	assert.equal(envelope?.command, "config.edit");
+});
+
+test("CLI config edit 的路径错误保持单 JSON 与退出码契约", () => {
+	const result = spawnSync(
+		process.execPath,
+		[
+			"--import",
+			"tsx",
+			"src/cli.ts",
+			"--config",
+			resolve("."),
+			"config",
+			"edit",
+		],
+		{ cwd: resolve("."), encoding: "utf8" },
+	);
+	assert.equal(result.status, 2);
+	assert.equal(result.stderr, "");
+	const lines = result.stdout.trim().split(/\r?\n/);
+	assert.equal(lines.length, 1);
+	const envelope = JSON.parse(lines[0] ?? "{}") as {
+		command?: string;
+		error?: { code?: string };
+	};
+	assert.equal(envelope.command, "config.edit");
+	assert.equal(envelope.error?.code, "config_error");
+});
+
+test("CLI config 缺少 edit 子命令时返回输入错误 envelope", () => {
+	const result = spawnSync(
+		process.execPath,
+		["--import", "tsx", "src/cli.ts", "config"],
+		{ cwd: resolve("."), encoding: "utf8" },
+	);
+	assert.equal(result.status, 2);
+	assert.equal(result.stderr, "");
+	const envelope = JSON.parse(result.stdout) as {
+		command?: string | null;
+		error?: { code?: string; message?: string };
+	};
+	assert.equal(envelope.command, null);
+	assert.equal(envelope.error?.code, "invalid_input");
+	assert.equal(envelope.error?.message, "必须指定 config 子命令");
+});
+
 test("CLI 通过符号链接入口运行时仍会执行主程序", () => {
 	const directory = mkdtempSync(join(tmpdir(), "web-access-cli-link-"));
 	const repositoryLink = join(directory, "repository");
@@ -132,4 +211,9 @@ test("生成的 JSON Schema 包含配置、请求与输出 schema", async () => 
 		) as unknown;
 		assert.equal(typeof schema, "object");
 	}
+	const outputSchema = await readFile(
+		resolve("schemas/output.schema.json"),
+		"utf8",
+	);
+	assert.match(outputSchema, /"const": "config\.edit"/);
 });

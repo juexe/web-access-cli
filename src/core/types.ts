@@ -12,7 +12,13 @@ export type ProviderType = (typeof PROVIDER_TYPES)[number];
 export const CAPABILITIES = ["search", "extract"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
-export const COMMANDS = ["search", "extract", "providers", "doctor"] as const;
+export const COMMANDS = [
+	"search",
+	"extract",
+	"providers",
+	"doctor",
+	"config.edit",
+] as const;
 export type Command = (typeof COMMANDS)[number];
 
 export const FRESHNESS_VALUES = ["day", "month", "year"] as const;
@@ -121,6 +127,7 @@ export interface ExtractData {
 export type ErrorCode =
 	| "invalid_input"
 	| "config_error"
+	| "open_failed"
 	| "provider_unknown"
 	| "provider_disabled"
 	| "provider_unavailable"
@@ -205,10 +212,21 @@ export interface DiagnosticSuccessEnvelope extends BaseEnvelope {
 	data: unknown;
 }
 
+export interface ConfigEditSuccessEnvelope extends BaseEnvelope {
+	ok: true;
+	command: "config.edit";
+	data: {
+		path: string;
+		created: boolean;
+		opened: true;
+	};
+}
+
 export type OutputEnvelope =
 	| SearchSuccessEnvelope
 	| ExtractSuccessEnvelope
 	| DiagnosticSuccessEnvelope
+	| ConfigEditSuccessEnvelope
 	| FailureEnvelope;
 
 export interface ProviderExecution<T> {

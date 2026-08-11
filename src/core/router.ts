@@ -6,6 +6,7 @@ import { DefaultHttpTransport, type HttpTransport } from "../transport/http.ts";
 import { asWebAccessError, redactText, WebAccessError } from "./errors.ts";
 import type {
 	Capability,
+	Command,
 	ExtractData,
 	ExtractRequest,
 	ExtractSuccessEnvelope,
@@ -436,7 +437,7 @@ export async function executeExtract(
 
 export function errorEnvelope(
 	error: unknown,
-	command: "search" | "extract" | "providers" | "doctor" | null = null,
+	command: Command | null = null,
 ): FailureEnvelope {
 	const normalized = asWebAccessError(error);
 	return {

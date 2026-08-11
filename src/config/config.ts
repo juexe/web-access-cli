@@ -28,6 +28,22 @@ export const DEFAULT_EXTRACT_PROVIDERS = [
 ] as const;
 export const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
+const DEFAULT_SEARCH_CONFIG: SearchConfig = {
+	providers: [...DEFAULT_SEARCH_PROVIDERS],
+	limit: 5,
+	timeoutMs: 60_000,
+	attemptTimeoutMs: 20_000,
+	maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
+};
+
+const DEFAULT_EXTRACT_CONFIG: ExtractConfig = {
+	providers: [...DEFAULT_EXTRACT_PROVIDERS],
+	timeoutMs: 120_000,
+	attemptTimeoutMs: 45_000,
+	maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
+	minContentCharacters: 500,
+};
+
 const SEARCH_TYPES = new Set<ProviderType>([
 	"tavily",
 	"exa",
@@ -133,7 +149,11 @@ function parsePositiveInt(
 }
 
 function parseLimit(value: unknown): number {
-	const limit = parsePositiveInt(value, "search.limit", 5);
+	const limit = parsePositiveInt(
+		value,
+		"search.limit",
+		DEFAULT_SEARCH_CONFIG.limit,
+	);
 	if (limit > 20) throw new ConfigError("search.limit 不能超过 20");
 	return limit;
 }
@@ -249,16 +269,20 @@ function parseSearch(value: unknown): Partial<SearchConfig> {
 	return {
 		providers: parseRoute(value.providers, "search.providers"),
 		limit: parseLimit(value.limit),
-		timeoutMs: parsePositiveInt(value.timeoutMs, "search.timeoutMs", 60_000),
+		timeoutMs: parsePositiveInt(
+			value.timeoutMs,
+			"search.timeoutMs",
+			DEFAULT_SEARCH_CONFIG.timeoutMs,
+		),
 		attemptTimeoutMs: parsePositiveInt(
 			value.attemptTimeoutMs,
 			"search.attemptTimeoutMs",
-			20_000,
+			DEFAULT_SEARCH_CONFIG.attemptTimeoutMs,
 		),
 		maxResponseBytes: parsePositiveInt(
 			value.maxResponseBytes,
 			"search.maxResponseBytes",
-			DEFAULT_MAX_RESPONSE_BYTES,
+			DEFAULT_SEARCH_CONFIG.maxResponseBytes,
 		),
 	};
 }
@@ -269,21 +293,25 @@ function parseExtract(value: unknown): Partial<ExtractConfig> {
 	assertKnownKeys(value, ALLOWED_EXTRACT_KEYS, "extract");
 	return {
 		providers: parseRoute(value.providers, "extract.providers"),
-		timeoutMs: parsePositiveInt(value.timeoutMs, "extract.timeoutMs", 120_000),
+		timeoutMs: parsePositiveInt(
+			value.timeoutMs,
+			"extract.timeoutMs",
+			DEFAULT_EXTRACT_CONFIG.timeoutMs,
+		),
 		attemptTimeoutMs: parsePositiveInt(
 			value.attemptTimeoutMs,
 			"extract.attemptTimeoutMs",
-			45_000,
+			DEFAULT_EXTRACT_CONFIG.attemptTimeoutMs,
 		),
 		maxResponseBytes: parsePositiveInt(
 			value.maxResponseBytes,
 			"extract.maxResponseBytes",
-			DEFAULT_MAX_RESPONSE_BYTES,
+			DEFAULT_EXTRACT_CONFIG.maxResponseBytes,
 		),
 		minContentCharacters: parsePositiveInt(
 			value.minContentCharacters,
 			"extract.minContentCharacters",
-			500,
+			DEFAULT_EXTRACT_CONFIG.minContentCharacters,
 		),
 	};
 }
@@ -460,11 +488,26 @@ export interface LoadedConfig {
 	instances: ProviderInstance[];
 }
 
+export function createDefaultAppConfig(): AppConfig {
+	return {
+		providers: DEFAULT_INSTANCE_CONFIGS.map((instance) => ({ ...instance })),
+		search: {
+			...DEFAULT_SEARCH_CONFIG,
+			providers: [...DEFAULT_SEARCH_CONFIG.providers],
+		},
+		extract: {
+			...DEFAULT_EXTRACT_CONFIG,
+			providers: [...DEFAULT_EXTRACT_CONFIG.providers],
+		},
+	};
+}
+
 export function loadConfig(
 	explicitPath?: string,
 	env: NodeJS.ProcessEnv = process.env,
 ): LoadedConfig {
 	const path = resolveConfigPath(explicitPath, env);
+	const defaults = createDefaultAppConfig();
 	let parsed: unknown = {};
 	const exists = existsSync(path);
 	if (exists) {
@@ -492,18 +535,22 @@ export function loadConfig(
 	);
 	const search: SearchConfig = {
 		providers: searchProviders,
-		limit: raw.search.limit ?? 5,
-		timeoutMs: raw.search.timeoutMs ?? 60_000,
-		attemptTimeoutMs: raw.search.attemptTimeoutMs ?? 20_000,
-		maxResponseBytes: raw.search.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
+		limit: raw.search.limit ?? defaults.search.limit,
+		timeoutMs: raw.search.timeoutMs ?? defaults.search.timeoutMs,
+		attemptTimeoutMs:
+			raw.search.attemptTimeoutMs ?? defaults.search.attemptTimeoutMs,
+		maxResponseBytes:
+			raw.search.maxResponseBytes ?? defaults.search.maxResponseBytes,
 	};
 	const extract: ExtractConfig = {
 		providers: extractProviders,
-		timeoutMs: raw.extract.timeoutMs ?? 120_000,
-		attemptTimeoutMs: raw.extract.attemptTimeoutMs ?? 45_000,
+		timeoutMs: raw.extract.timeoutMs ?? defaults.extract.timeoutMs,
+		attemptTimeoutMs:
+			raw.extract.attemptTimeoutMs ?? defaults.extract.attemptTimeoutMs,
 		maxResponseBytes:
-			raw.extract.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
-		minContentCharacters: raw.extract.minContentCharacters ?? 500,
+			raw.extract.maxResponseBytes ?? defaults.extract.maxResponseBytes,
+		minContentCharacters:
+			raw.extract.minContentCharacters ?? defaults.extract.minContentCharacters,
 	};
 	const app: AppConfig = { providers: instanceConfigs, search, extract };
 	return {

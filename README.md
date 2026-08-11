@@ -85,9 +85,12 @@ web-access extract https://example.com/article --provider http --timeout 30000
 
 web-access providers --pretty
 web-access doctor --pretty
+
+web-access config edit
+web-access --config "/path/to/config.json" config edit
 ```
 
-The CLI provides exactly four commands: `search`, `extract`, `providers`, and `doctor`. The current version does not provide batch/all, answer, a dedicated PDF path, a Node.js SDK, or MCP integration. The repository includes an optional [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md) for source-checkout use; it is not included in the npm package.
+The CLI provides the `search` and `extract` capability commands, the `providers` and `doctor` diagnostic commands, and the `config edit` configuration command. The current version does not provide batch/all, answer, a dedicated PDF path, a Node.js SDK, or MCP integration. The repository includes an optional [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md) for source-checkout use; it is not included in the npm package.
 
 ### Global options
 
@@ -102,6 +105,8 @@ Except for help and version output, stdout always contains exactly one JSON enve
 Configuration files use strict JSON; unknown fields are rejected. The CLI reads only an explicit path or a user-level path and does not search parent project directories for configuration files.
 
 The default path on every platform is `~/.config/web-access-cli/config.json`, where `~` is the current user's home directory. The `WEB_ACCESS_CONFIG` environment variable can select another path. The `--config` command-line option takes precedence.
+
+`web-access config edit` creates parent directories and a complete default configuration when the file is missing, then opens it with the operating system's default application for JSON files. An existing file is opened byte-for-byte as-is, even when it is temporarily invalid JSON; it is never overwritten or reformatted. The command waits only for the operating system to accept the open request, not for the editor to close. On success, envelope `data` contains the absolute `path`, `created`, and `opened: true`. A default-application launch failure returns `open_failed`; a configuration file that was created successfully remains available for manual editing.
 
 The complete JSON Schema is available at [schemas/config.schema.json](schemas/config.schema.json). Example:
 
@@ -238,7 +243,7 @@ Exit codes:
 
 - `0`: Success
 - `2`: Invalid input or configuration, or an unknown or disabled provider
-- `1`: Runtime, provider, or doctor failure
+- `1`: Runtime, provider, doctor, or default-application launch failure
 - `130`: User cancellation
 
 `providers` lists each instance's type, capabilities, route status, credential source, and base URL source. `doctor` performs local configuration checks only and does not call remote APIs. If an enabled route contains an unconfigured instance, the command returns `doctor_failed` with exit code `1`.
