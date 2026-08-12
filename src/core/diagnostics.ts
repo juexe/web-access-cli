@@ -29,7 +29,7 @@ function providerInfo(
 		},
 		credentialSource: instance.credentialSource,
 		baseUrlSource: instance.baseUrlSource,
-		...(instance.type === "anysearch"
+		...(instance.type === "anysearch" || instance.type === "xcrawl"
 			? { searchFilterMode: instance.searchFilterMode ?? "strict" }
 			: {}),
 	};
@@ -75,7 +75,7 @@ export function executeDoctor(
 			type: instance.type,
 			checks,
 			ok: checks.search && checks.extract,
-			...(instance.type === "anysearch"
+			...(instance.type === "anysearch" || instance.type === "xcrawl"
 				? { searchFilterMode: instance.searchFilterMode ?? "strict" }
 				: {}),
 		};

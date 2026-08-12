@@ -51,6 +51,8 @@ const SEARCH_TYPES = new Set<ProviderType>([
 	"exa",
 	"brave",
 	"searxng",
+	"anysearch",
+	"xcrawl",
 ]);
 const EXTRACT_TYPES = new Set<ProviderType>([
 	"firecrawl",
@@ -58,8 +60,8 @@ const EXTRACT_TYPES = new Set<ProviderType>([
 	"exa",
 	"http",
 	"anysearch",
+	"xcrawl",
 ]);
-SEARCH_TYPES.add("anysearch");
 
 const DEFAULT_INSTANCE_CONFIGS: ProviderInstanceConfig[] = [
 	{ id: "tavily", type: "tavily" },
@@ -70,6 +72,7 @@ const DEFAULT_INSTANCE_CONFIGS: ProviderInstanceConfig[] = [
 	{ id: "jina", type: "jina" },
 	{ id: "http", type: "http" },
 	{ id: "anysearch", type: "anysearch", searchFilterMode: "strict" },
+	{ id: "xcrawl", type: "xcrawl", searchFilterMode: "strict" },
 ];
 
 const STANDARD_KEY_ENV: Partial<Record<ProviderType, string>> = {
@@ -79,6 +82,7 @@ const STANDARD_KEY_ENV: Partial<Record<ProviderType, string>> = {
 	firecrawl: "FIRECRAWL_API_KEY",
 	jina: "JINA_API_KEY",
 	anysearch: "ANYSEARCH_API_KEY",
+	xcrawl: "XCRAWL_API_KEY",
 };
 
 const STANDARD_BASE_ENV: Partial<Record<ProviderType, string>> = {
@@ -89,7 +93,10 @@ const STANDARD_BASE_ENV: Partial<Record<ProviderType, string>> = {
 	firecrawl: "FIRECRAWL_BASE_URL",
 	jina: "JINA_BASE_URL",
 	anysearch: "ANYSEARCH_BASE_URL",
+	xcrawl: "XCRAWL_BASE_URL",
 };
+
+const SEARCH_FILTER_TYPES = new Set<ProviderType>(["anysearch", "xcrawl"]);
 
 const ALLOWED_INSTANCE_KEYS = new Set([
 	"id",
@@ -255,8 +262,13 @@ function parseInstance(value: unknown, index: number): ProviderInstanceConfig {
 		throw new ConfigError(
 			`${path}.searchFilterMode 必须是 strict 或 best_effort`,
 		);
-	if (searchFilterMode !== undefined && type !== "anysearch")
-		throw new ConfigError(`${path}.searchFilterMode 仅适用于 anysearch`);
+	if (
+		searchFilterMode !== undefined &&
+		!SEARCH_FILTER_TYPES.has(type as ProviderType)
+	)
+		throw new ConfigError(
+			`${path}.searchFilterMode 仅适用于 anysearch 或 xcrawl`,
+		);
 	return {
 		id,
 		type: type as ProviderType,
@@ -499,7 +511,7 @@ function resolveProvider(
 		headers: { ...(instance.headers ?? {}) },
 		searchFilterMode:
 			instance.searchFilterMode ??
-			(instance.type === "anysearch" ? "strict" : null),
+			(SEARCH_FILTER_TYPES.has(instance.type) ? "strict" : null),
 	};
 }
 
@@ -510,6 +522,7 @@ const DEFAULT_BASE_URLS: Partial<Record<ProviderType, string>> = {
 	firecrawl: "https://api.firecrawl.dev",
 	jina: "https://r.jina.ai",
 	anysearch: "https://api.anysearch.com",
+	xcrawl: "https://run.xcrawl.com",
 };
 
 export interface LoadedConfig {

@@ -5,7 +5,7 @@ English | [简体中文](README_CN.md)
 [![CI](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An agent-neutral CLI for web capabilities. It defines search and web content extraction as stable capabilities while normalizing differences among Tavily, Exa, Brave, SearXNG, AnySearch, Firecrawl, Jina, and other providers behind a unified internal schema.
+An agent-neutral CLI for web capabilities. It defines search and web content extraction as stable capabilities while normalizing differences among Tavily, Exa, Brave, SearXNG, AnySearch, XCrawl, Firecrawl, Jina, and other providers behind a unified internal schema.
 
 The CLI is the primary product interface. It is not tied to Pi, Claude Code, Codex, Cursor, OpenCode, or any other agent. Skills, MCP integrations, and agent plugins may only integrate as adapters on top of the CLI; they must not leak into the core capabilities or provider implementations.
 
@@ -13,8 +13,8 @@ The CLI is the primary product interface. It is not tied to Pi, Claude Code, Cod
 
 | Capability | Provider types | Normalized output |
 | --- | --- | --- |
-| `search` | Tavily, Exa, Brave, SearXNG, AnySearch | `rank`, `title`, `url`, `snippet` |
-| `extract` | Firecrawl v2, Jina Reader, Exa Contents, AnySearch, HTTP | Markdown `Document` |
+| `search` | Tavily, Exa, Brave, SearXNG, AnySearch, XCrawl | `rank`, `title`, `url`, `snippet` |
+| `extract` | Firecrawl v2, Jina Reader, Exa Contents, AnySearch, XCrawl, HTTP | Markdown `Document` |
 
 A provider type describes an implementation, while a provider instance is a configurable instance of that type. One type can have multiple instances, such as `exa_team` and `exa_personal`. A route is an ordered array of instance IDs that determines both which instances are enabled and the order in which `auto` tries them.
 
@@ -150,14 +150,14 @@ The complete JSON Schema is available at [schemas/config.schema.json](schemas/co
 }
 ```
 
-The built-in instances are `tavily`, `exa`, `brave`, `searxng`, `firecrawl`, `jina`, `http`, and `anysearch`. A configuration entry with the same ID overrides fields on the built-in instance. A custom ID creates another instance of the selected type. An instance is enabled only when it appears in the corresponding `providers` route. AnySearch defaults to `https://api.anysearch.com` and supports anonymous calls.
+The built-in instances are `tavily`, `exa`, `brave`, `searxng`, `firecrawl`, `jina`, `http`, `anysearch`, and `xcrawl`. A configuration entry with the same ID overrides fields on the built-in instance. A custom ID creates another instance of the selected type. An instance is enabled only when it appears in the corresponding `providers` route. AnySearch defaults to `https://api.anysearch.com` and supports anonymous calls; XCrawl defaults to `https://run.xcrawl.com` and requires an API key.
 
 Default routes:
 
 - Search: `tavily -> exa -> brave -> searxng`
 - Extract: `firecrawl -> jina -> exa -> http`
 
-AnySearch supports both Search and Extract but is not in either default route. Set `searchFilterMode` to `strict` (default; freshness skips the provider) or `best_effort` (rewrites freshness into a query fragment). Domain constraints are rewritten into the query and strictly re-applied locally.
+AnySearch and XCrawl support both Search and Extract but are not in either default route. Both instance types accept `searchFilterMode`: `strict` (default; freshness skips the provider) or `best_effort` (rewrites freshness into a query fragment). Domain constraints are rewritten into the query and strictly re-applied locally. XCrawl Extract always uses synchronous Scrape with Markdown output; Map, Crawl, and asynchronous jobs are outside the current CLI capabilities.
 
 ### Credentials and URLs
 
@@ -173,6 +173,7 @@ Environment variables take precedence over plaintext keys in JSON. Built-in inst
 | Jina | `JINA_API_KEY`, optional | `JINA_BASE_URL` |
 | HTTP | None | None |
 | AnySearch | `ANYSEARCH_API_KEY`, optional | `ANYSEARCH_BASE_URL`, default `https://api.anysearch.com` |
+| XCrawl | `XCRAWL_API_KEY` | `XCRAWL_BASE_URL`, default `https://run.xcrawl.com` |
 
 Custom instances use `apiKeyEnv` and `baseUrlEnv` to name their environment variables. Every remote provider can define a `baseUrl` and additional `headers`. The public `api.firecrawl.dev` service requires a key; a self-hosted Firecrawl v2 instance can run without one.
 

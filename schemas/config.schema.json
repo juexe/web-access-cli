@@ -117,8 +117,16 @@
                 "additionalProperties": false
               },
               "type": {
-                "type": "string",
-                "const": "anysearch"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "anysearch"
+                  },
+                  {
+                    "type": "string",
+                    "const": "xcrawl"
+                  }
+                ]
               },
               "searchFilterMode": {
                 "anyOf": [

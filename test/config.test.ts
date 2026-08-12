@@ -82,12 +82,63 @@ test("AnySearch 配置支持匿名、标准环境变量和专属过滤模式", (
 	}
 });
 
-test("非 AnySearch instance 拒绝 searchFilterMode", () => {
+test("XCrawl 配置标准环境变量、双能力和过滤模式", () => {
+	const fixture = configFile({
+		providers: [
+			{ id: "xcrawl", type: "xcrawl", searchFilterMode: "best_effort" },
+		],
+		search: { providers: ["xcrawl"] },
+		extract: { providers: ["xcrawl"] },
+	});
+	try {
+		const loaded = loadConfig(fixture.path, {
+			XCRAWL_API_KEY: "xcrawl-key",
+			XCRAWL_BASE_URL: "https://xcrawl.internal/",
+		});
+		const xcrawl = loaded.instances.find((item) => item.id === "xcrawl");
+		assert.equal(xcrawl?.apiKey, "xcrawl-key");
+		assert.equal(xcrawl?.credentialSource, "standard_env");
+		assert.equal(xcrawl?.baseUrl, "https://xcrawl.internal");
+		assert.equal(xcrawl?.baseUrlSource, "standard_env");
+		assert.equal(xcrawl?.searchFilterMode, "best_effort");
+		const provider = (
+			executeProviders(loaded).data as {
+				providers: Array<Record<string, unknown>>;
+			}
+		).providers.find((item) => item.id === "xcrawl");
+		assert.deepEqual(provider?.capabilities, ["search", "extract"]);
+		assert.deepEqual(provider?.routes, { search: true, extract: true });
+		assert.equal(executeDoctor(loaded).ok, true);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("XCrawl 缺少凭据时 doctor 报告未完成配置", () => {
+	const fixture = configFile({
+		search: { providers: ["xcrawl"] },
+		extract: { providers: [] },
+	});
+	try {
+		const loaded = loadConfig(fixture.path, {});
+		const xcrawl = loaded.instances.find((item) => item.id === "xcrawl");
+		assert.equal(xcrawl?.baseUrl, "https://run.xcrawl.com");
+		assert.equal(xcrawl?.apiKey, null);
+		assert.equal(executeDoctor(loaded).ok, false);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("不支持过滤策略的 instance 拒绝 searchFilterMode", () => {
 	const fixture = configFile({
 		providers: [{ id: "http", type: "http", searchFilterMode: "strict" }],
 	});
 	try {
-		assert.throws(() => loadConfig(fixture.path, {}), /仅适用于 anysearch/);
+		assert.throws(
+			() => loadConfig(fixture.path, {}),
+			/仅适用于 anysearch 或 xcrawl/,
+		);
 	} finally {
 		fixture.cleanup();
 	}
@@ -138,6 +189,16 @@ test("只读取显式或用户级配置路径", () => {
 			"brave",
 			"searxng",
 		]);
+		assert.deepEqual(loaded.app.extract.providers, [
+			"firecrawl",
+			"jina",
+			"exa",
+			"http",
+		]);
+		assert.equal(
+			loaded.instances.find((item) => item.id === "xcrawl")?.searchFilterMode,
+			"strict",
+		);
 	} finally {
 		fixture.cleanup();
 	}

@@ -216,4 +216,11 @@ test("生成的 JSON Schema 包含配置、请求与输出 schema", async () => 
 		"utf8",
 	);
 	assert.match(outputSchema, /"const": "config\.edit"/);
+	assert.match(outputSchema, /"const": "xcrawl"/);
+	const configSchema = await readFile(
+		resolve("schemas/config.schema.json"),
+		"utf8",
+	);
+	assert.match(configSchema, /"const": "xcrawl"/);
+	assert.match(configSchema, /"searchFilterMode"/);
 });

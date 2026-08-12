@@ -93,6 +93,10 @@
             {
               "type": "string",
               "const": "anysearch"
+            },
+            {
+              "type": "string",
+              "const": "xcrawl"
             }
           ]
         }
@@ -151,6 +155,10 @@
                   {
                     "type": "string",
                     "const": "anysearch"
+                  },
+                  {
+                    "type": "string",
+                    "const": "xcrawl"
                   }
                 ]
               }
@@ -232,6 +240,10 @@
                       {
                         "type": "string",
                         "const": "anysearch"
+                      },
+                      {
+                        "type": "string",
+                        "const": "xcrawl"
                       }
                     ]
                   }
@@ -308,6 +320,10 @@
                 {
                   "type": "string",
                   "const": "anysearch"
+                },
+                {
+                  "type": "string",
+                  "const": "xcrawl"
                 }
               ]
             }
@@ -370,6 +386,10 @@
                 {
                   "type": "string",
                   "const": "anysearch"
+                },
+                {
+                  "type": "string",
+                  "const": "xcrawl"
                 }
               ]
             }

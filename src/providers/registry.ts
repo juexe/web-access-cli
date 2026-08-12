@@ -6,6 +6,7 @@ import type {
 import { ANYSEARCH_ADAPTER } from "./anysearch.ts";
 import { EXTRACT_ADAPTERS } from "./extract.ts";
 import { EXA_ADAPTER, SEARCH_ADAPTERS } from "./search.ts";
+import { XCRAWL_ADAPTER } from "./xcrawl.ts";
 
 const adapters = [...SEARCH_ADAPTERS, ...EXTRACT_ADAPTERS].reduce<
 	Map<ProviderType, ProviderAdapter>
@@ -27,6 +28,7 @@ const adapters = [...SEARCH_ADAPTERS, ...EXTRACT_ADAPTERS].reduce<
 	new Map([
 		[EXA_ADAPTER.type, EXA_ADAPTER],
 		[ANYSEARCH_ADAPTER.type, ANYSEARCH_ADAPTER],
+		[XCRAWL_ADAPTER.type, XCRAWL_ADAPTER],
 	]),
 );
 

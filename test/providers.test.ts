@@ -196,6 +196,226 @@ test("AnySearch Extract 使用固定 JSON-RPC tools/call 并合并 text blocks",
 	assert.equal(result.data.document.content, "# 标题\n\n正文内容");
 });
 
+test("XCrawl Search 使用固定 REST 协议并规范化嵌套结果", async () => {
+	const transport = new MockTransport((url, options) => {
+		assert.equal(url, "https://xcrawl.test/v1/search");
+		assert.equal(options.method, "POST");
+		assert.equal(options.headers?.Authorization, "Bearer test-key");
+		assert.deepEqual(JSON.parse(options.body ?? ""), {
+			query: "agent neutral web cli site:example.com -site:blocked.example.com",
+			limit: 20,
+		});
+		return response({
+			search_id: "search-1",
+			endpoint: "search",
+			status: "completed",
+			data: {
+				data: [
+					{
+						description: "first snippet",
+						position: 8,
+						title: null,
+						url: "https://example.com/a#fragment",
+					},
+					{
+						description: "duplicate",
+						position: 9,
+						title: "duplicate",
+						url: "https://example.com/a",
+					},
+					{
+						description: "blocked",
+						position: 10,
+						title: "blocked",
+						url: "https://blocked.example.com/b",
+					},
+				],
+			},
+		});
+	});
+	const adapter = getAdapter("xcrawl", "search");
+	assert.ok(adapter?.search);
+	const request = searchRequest("xcrawl", transport);
+	request.freshness = undefined;
+	request.instance.headers.authorization = "Bearer untrusted-override";
+	const result = await adapter.search(request);
+	assert.deepEqual(result.data.results, [
+		{
+			rank: 1,
+			title: "https://example.com/a",
+			url: "https://example.com/a",
+			snippet: "first snippet",
+		},
+	]);
+});
+
+test("XCrawl strict freshness 不发请求，best_effort 改写日期查询", async () => {
+	const transport = new MockTransport(() =>
+		response({ status: "completed", data: { data: [] } }),
+	);
+	const adapter = getAdapter("xcrawl", "search");
+	assert.ok(adapter?.search);
+	const request = searchRequest("xcrawl", transport);
+	request.instance.searchFilterMode = "strict";
+	await assert.rejects(
+		adapter.search(request),
+		(error: unknown) =>
+			error instanceof Error &&
+			"code" in error &&
+			error.code === "provider_unavailable",
+	);
+	assert.equal(transport.calls.length, 0);
+	request.instance.searchFilterMode = "best_effort";
+	await adapter.search(request);
+	assert.match(
+		JSON.parse(transport.calls[0]?.options.body ?? "").query,
+		/after:\d{4}-\d{2}-\d{2}/,
+	);
+});
+
+test("XCrawl Extract 使用同步 Markdown Scrape 并映射文档", async () => {
+	const transport = new MockTransport((url, options) => {
+		assert.equal(url, "https://xcrawl.test/v1/scrape");
+		assert.deepEqual(JSON.parse(options.body ?? ""), {
+			url: "https://example.com/article",
+			mode: "sync",
+			output: { formats: ["markdown"] },
+		});
+		return response({
+			scrape_id: "scrape-1",
+			endpoint: "scrape",
+			status: "completed",
+			url: "https://example.com/article",
+			data: {
+				markdown: "# 正文标题  \r\n\r\n这是 XCrawl 返回的正文。  \r\n",
+				metadata: {
+					title: "元数据标题",
+					final_url: "https://example.com/final",
+				},
+			},
+		});
+	});
+	const adapter = getAdapter("xcrawl", "extract");
+	assert.ok(adapter?.extract);
+	const result = await adapter.extract(extractRequest("xcrawl", transport));
+	assert.deepEqual(result.data.document, {
+		sourceUrl: "https://example.com/final",
+		title: "元数据标题",
+		content: "# 正文标题\n\n这是 XCrawl 返回的正文。",
+		contentType: "text/markdown",
+	});
+});
+
+test("XCrawl 失败状态与无效响应映射为稳定错误", async (t) => {
+	await t.test("failed", async () => {
+		const transport = new MockTransport(() =>
+			response({ status: "failed", message: "key=test-key" }),
+		);
+		const adapter = getAdapter("xcrawl", "extract");
+		assert.ok(adapter?.extract);
+		await assert.rejects(
+			adapter.extract(extractRequest("xcrawl", transport)),
+			(error: unknown) =>
+				error instanceof Error &&
+				"code" in error &&
+				error.code === "provider_error" &&
+				!error.message.includes("test-key"),
+		);
+	});
+	await t.test("missing data", async () => {
+		const transport = new MockTransport(() =>
+			response({ status: "completed" }),
+		);
+		const adapter = getAdapter("xcrawl", "search");
+		assert.ok(adapter?.search);
+		const request = searchRequest("xcrawl", transport);
+		request.freshness = undefined;
+		await assert.rejects(
+			adapter.search(request),
+			(error: unknown) =>
+				error instanceof Error &&
+				"code" in error &&
+				error.code === "invalid_response",
+		);
+	});
+	await t.test("unknown status", async () => {
+		const transport = new MockTransport(() =>
+			response({ status: "pending-test-key" }),
+		);
+		const adapter = getAdapter("xcrawl", "search");
+		assert.ok(adapter?.search);
+		const request = searchRequest("xcrawl", transport);
+		request.freshness = undefined;
+		await assert.rejects(
+			adapter.search(request),
+			(error: unknown) =>
+				error instanceof Error &&
+				"code" in error &&
+				error.code === "invalid_response" &&
+				!error.message.includes("test-key"),
+		);
+	});
+	await t.test("missing markdown", async () => {
+		const transport = new MockTransport(() =>
+			response({ status: "completed", data: { metadata: {} } }),
+		);
+		const adapter = getAdapter("xcrawl", "extract");
+		assert.ok(adapter?.extract);
+		await assert.rejects(
+			adapter.extract(extractRequest("xcrawl", transport)),
+			(error: unknown) =>
+				error instanceof Error &&
+				"code" in error &&
+				error.code === "no_usable_content",
+		);
+	});
+	await t.test("invalid JSON", async () => {
+		const transport = new MockTransport(() => response("not JSON"));
+		const adapter = getAdapter("xcrawl", "search");
+		assert.ok(adapter?.search);
+		const request = searchRequest("xcrawl", transport);
+		request.freshness = undefined;
+		await assert.rejects(
+			adapter.search(request),
+			(error: unknown) =>
+				error instanceof Error &&
+				"code" in error &&
+				error.code === "invalid_response",
+		);
+	});
+});
+
+test("XCrawl HTTP 失败沿用统一错误分类", async (t) => {
+	const cases = [
+		{ status: 401, code: "auth_error", retryable: false },
+		{ status: 403, code: "auth_error", retryable: false },
+		{ status: 402, code: "quota_exceeded", retryable: true },
+		{ status: 429, code: "rate_limited", retryable: true },
+		{ status: 500, code: "provider_error", retryable: true },
+	] as const;
+	for (const item of cases) {
+		await t.test(String(item.status), async () => {
+			const transport = new MockTransport(() =>
+				response({ error: "test-key rejected" }, { status: item.status }),
+			);
+			const adapter = getAdapter("xcrawl", "search");
+			assert.ok(adapter?.search);
+			const request = searchRequest("xcrawl", transport);
+			request.freshness = undefined;
+			await assert.rejects(
+				adapter.search(request),
+				(error: unknown) =>
+					error instanceof Error &&
+					"code" in error &&
+					error.code === item.code &&
+					"retryable" in error &&
+					error.retryable === item.retryable &&
+					!error.message.includes("test-key"),
+			);
+		});
+	}
+});
+
 function extractRequest(
 	type: ProviderType,
 	transport: MockTransport,

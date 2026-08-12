@@ -11,9 +11,13 @@ const literalUnion = <T extends readonly string[]>(values: T) =>
 	Type.Union(values.map((value) => Type.Literal(value)));
 
 export const ProviderTypeSchema = literalUnion(PROVIDER_TYPES);
-const NonAnySearchProviderTypeSchema = literalUnion(
-	PROVIDER_TYPES.filter((value) => value !== "anysearch"),
+const NonSearchFilterProviderTypeSchema = literalUnion(
+	PROVIDER_TYPES.filter((value) => value !== "anysearch" && value !== "xcrawl"),
 );
+const SearchFilterProviderTypeSchema = Type.Union([
+	Type.Literal("anysearch"),
+	Type.Literal("xcrawl"),
+]);
 export const CapabilitySchema = literalUnion(CAPABILITIES);
 export const CommandSchema = literalUnion(COMMANDS);
 export const FreshnessSchema = literalUnion(FRESHNESS_VALUES);
@@ -41,14 +45,14 @@ export const ProviderInstanceConfigSchema = Type.Union([
 	Type.Object(
 		{
 			...ProviderInstanceFields,
-			type: NonAnySearchProviderTypeSchema,
+			type: NonSearchFilterProviderTypeSchema,
 		},
 		{ additionalProperties: false },
 	),
 	Type.Object(
 		{
 			...ProviderInstanceFields,
-			type: Type.Literal("anysearch"),
+			type: SearchFilterProviderTypeSchema,
 			searchFilterMode: Type.Optional(SearchFilterModeSchema),
 		},
 		{ additionalProperties: false },

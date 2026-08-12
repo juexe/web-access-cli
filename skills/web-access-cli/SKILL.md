@@ -44,6 +44,8 @@ description: 使用 web-access CLI 搜索实时网页信息、查找来源，并
 
 AnySearch 同时支持两个能力，但必须显式加入 Route。其 `searchFilterMode` 默认为 `strict`；`best_effort` 会把 freshness 改写为查询片段。配置 base URL 后允许匿名调用。
 
+XCrawl 同时支持两个能力，但必须显式加入 Route，并配置 `XCRAWL_API_KEY`。其 `searchFilterMode` 默认为 `strict`；`best_effort` 会把 freshness 改写为查询片段。Extract 只使用同步 Markdown Scrape，不提供 Map、Crawl 或异步任务接口。
+
 ## 搜索网页
 
 基础搜索：

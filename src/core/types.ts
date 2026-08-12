@@ -7,6 +7,7 @@ export const PROVIDER_TYPES = [
 	"jina",
 	"http",
 	"anysearch",
+	"xcrawl",
 ] as const;
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
 
