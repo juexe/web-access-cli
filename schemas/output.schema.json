@@ -89,6 +89,10 @@
             {
               "type": "string",
               "const": "http"
+            },
+            {
+              "type": "string",
+              "const": "anysearch"
             }
           ]
         }
@@ -143,6 +147,10 @@
                   {
                     "type": "string",
                     "const": "http"
+                  },
+                  {
+                    "type": "string",
+                    "const": "anysearch"
                   }
                 ]
               }
@@ -220,6 +228,10 @@
                       {
                         "type": "string",
                         "const": "http"
+                      },
+                      {
+                        "type": "string",
+                        "const": "anysearch"
                       }
                     ]
                   }
@@ -292,6 +304,10 @@
                 {
                   "type": "string",
                   "const": "http"
+                },
+                {
+                  "type": "string",
+                  "const": "anysearch"
                 }
               ]
             }
@@ -350,6 +366,10 @@
                 {
                   "type": "string",
                   "const": "http"
+                },
+                {
+                  "type": "string",
+                  "const": "anysearch"
                 }
               ]
             }

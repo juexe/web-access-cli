@@ -141,3 +141,40 @@ test("route 外的显式 instance 返回 provider_disabled", async () => {
 		fixture.cleanup();
 	}
 });
+
+test("AnySearch 402 自动注册响应在 envelope 中递归脱敏", async () => {
+	const fixture = loadedConfig({
+		providers: [{ id: "anysearch", type: "anysearch" }],
+		search: { providers: ["anysearch"] },
+		extract: { providers: ["http"] },
+	});
+	const transport = new MockTransport(() =>
+		response(
+			{
+				code: 402,
+				message: "quota",
+				auto_registered: {
+					username: "user@example.com",
+					password: "secret-password",
+					api_key: "response-key",
+				},
+			},
+			{ status: 200 },
+		),
+	);
+	try {
+		const envelope = await executeSearch(
+			{ ...searchRequest, provider: "auto" },
+			{ loaded: fixture.loaded, transport },
+		);
+		assert.equal(envelope.ok, false);
+		const serialized = JSON.stringify(envelope);
+		assert.doesNotMatch(
+			serialized,
+			/secret-password|response-key|user@example.com/,
+		);
+		assert.match(serialized, /quota_exceeded|provider_exhausted/);
+	} finally {
+		fixture.cleanup();
+	}
+});

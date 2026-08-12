@@ -60,6 +60,7 @@ test("config edit 创建完整默认配置后再调用系统打开器", async (t
 		{ id: "firecrawl", type: "firecrawl" },
 		{ id: "jina", type: "jina" },
 		{ id: "http", type: "http" },
+		{ id: "anysearch", type: "anysearch", searchFilterMode: "strict" },
 	]);
 	assert.deepEqual(parsed.search, {
 		providers: ["tavily", "exa", "brave", "searxng"],

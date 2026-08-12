@@ -10,7 +10,9 @@ import {
 	type ProviderInstance,
 	type ProviderInstanceConfig,
 	type ProviderType,
+	SEARCH_FILTER_MODES,
 	type SearchConfig,
+	type SearchFilterMode,
 } from "../core/types.ts";
 
 export const CONFIG_ENV = "WEB_ACCESS_CONFIG";
@@ -55,7 +57,9 @@ const EXTRACT_TYPES = new Set<ProviderType>([
 	"jina",
 	"exa",
 	"http",
+	"anysearch",
 ]);
+SEARCH_TYPES.add("anysearch");
 
 const DEFAULT_INSTANCE_CONFIGS: ProviderInstanceConfig[] = [
 	{ id: "tavily", type: "tavily" },
@@ -65,6 +69,7 @@ const DEFAULT_INSTANCE_CONFIGS: ProviderInstanceConfig[] = [
 	{ id: "firecrawl", type: "firecrawl" },
 	{ id: "jina", type: "jina" },
 	{ id: "http", type: "http" },
+	{ id: "anysearch", type: "anysearch", searchFilterMode: "strict" },
 ];
 
 const STANDARD_KEY_ENV: Partial<Record<ProviderType, string>> = {
@@ -73,6 +78,7 @@ const STANDARD_KEY_ENV: Partial<Record<ProviderType, string>> = {
 	brave: "BRAVE_API_KEY",
 	firecrawl: "FIRECRAWL_API_KEY",
 	jina: "JINA_API_KEY",
+	anysearch: "ANYSEARCH_API_KEY",
 };
 
 const STANDARD_BASE_ENV: Partial<Record<ProviderType, string>> = {
@@ -82,6 +88,7 @@ const STANDARD_BASE_ENV: Partial<Record<ProviderType, string>> = {
 	searxng: "SEARXNG_BASE_URL",
 	firecrawl: "FIRECRAWL_BASE_URL",
 	jina: "JINA_BASE_URL",
+	anysearch: "ANYSEARCH_BASE_URL",
 };
 
 const ALLOWED_INSTANCE_KEYS = new Set([
@@ -92,6 +99,7 @@ const ALLOWED_INSTANCE_KEYS = new Set([
 	"baseUrl",
 	"baseUrlEnv",
 	"headers",
+	"searchFilterMode",
 ]);
 const ALLOWED_SEARCH_KEYS = new Set([
 	"providers",
@@ -233,6 +241,22 @@ function parseInstance(value: unknown, index: number): ProviderInstanceConfig {
 		`${path}.baseUrlEnv`,
 	);
 	const headers = normalizeHeaders(value.headers, `${path}.headers`);
+	const searchFilterMode =
+		value.searchFilterMode === undefined
+			? undefined
+			: parseString(
+					value.searchFilterMode,
+					`${path}.searchFilterMode`,
+				).toLowerCase();
+	if (
+		searchFilterMode !== undefined &&
+		!SEARCH_FILTER_MODES.includes(searchFilterMode as SearchFilterMode)
+	)
+		throw new ConfigError(
+			`${path}.searchFilterMode 必须是 strict 或 best_effort`,
+		);
+	if (searchFilterMode !== undefined && type !== "anysearch")
+		throw new ConfigError(`${path}.searchFilterMode 仅适用于 anysearch`);
 	return {
 		id,
 		type: type as ProviderType,
@@ -245,6 +269,9 @@ function parseInstance(value: unknown, index: number): ProviderInstanceConfig {
 			? { baseUrlEnv: validateEnvName(baseUrlEnvRaw, `${path}.baseUrlEnv`) }
 			: {}),
 		...(headers ? { headers } : {}),
+		...(searchFilterMode
+			? { searchFilterMode: searchFilterMode as SearchFilterMode }
+			: {}),
 	};
 }
 
@@ -470,6 +497,9 @@ function resolveProvider(
 		baseUrl,
 		baseUrlSource,
 		headers: { ...(instance.headers ?? {}) },
+		searchFilterMode:
+			instance.searchFilterMode ??
+			(instance.type === "anysearch" ? "strict" : null),
 	};
 }
 
@@ -479,6 +509,7 @@ const DEFAULT_BASE_URLS: Partial<Record<ProviderType, string>> = {
 	brave: "https://api.search.brave.com",
 	firecrawl: "https://api.firecrawl.dev",
 	jina: "https://r.jina.ai",
+	anysearch: "https://api.anysearch.com",
 };
 
 export interface LoadedConfig {

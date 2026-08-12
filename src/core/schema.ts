@@ -4,38 +4,56 @@ import {
 	COMMANDS,
 	FRESHNESS_VALUES,
 	PROVIDER_TYPES,
+	SEARCH_FILTER_MODES,
 } from "./types.ts";
 
 const literalUnion = <T extends readonly string[]>(values: T) =>
 	Type.Union(values.map((value) => Type.Literal(value)));
 
 export const ProviderTypeSchema = literalUnion(PROVIDER_TYPES);
+const NonAnySearchProviderTypeSchema = literalUnion(
+	PROVIDER_TYPES.filter((value) => value !== "anysearch"),
+);
 export const CapabilitySchema = literalUnion(CAPABILITIES);
 export const CommandSchema = literalUnion(COMMANDS);
 export const FreshnessSchema = literalUnion(FRESHNESS_VALUES);
+export const SearchFilterModeSchema = literalUnion(SEARCH_FILTER_MODES);
 
-export const ProviderInstanceConfigSchema = Type.Object(
-	{
-		id: Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" }),
-		type: ProviderTypeSchema,
-		apiKey: Type.Optional(Type.String()),
-		apiKeyEnv: Type.Optional(
-			Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }),
+const ProviderInstanceFields = {
+	id: Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" }),
+	apiKey: Type.Optional(Type.String()),
+	apiKeyEnv: Type.Optional(
+		Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }),
+	),
+	baseUrl: Type.Optional(Type.String({ format: "uri" })),
+	baseUrlEnv: Type.Optional(
+		Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }),
+	),
+	headers: Type.Optional(
+		Type.Record(
+			Type.String({ pattern: "^[^\\r\\n]+$" }),
+			Type.String({ pattern: "^[^\\r\\n]*$" }),
+			{ additionalProperties: false },
 		),
-		baseUrl: Type.Optional(Type.String({ format: "uri" })),
-		baseUrlEnv: Type.Optional(
-			Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }),
-		),
-		headers: Type.Optional(
-			Type.Record(
-				Type.String({ pattern: "^[^\\r\\n]+$" }),
-				Type.String({ pattern: "^[^\\r\\n]*$" }),
-				{ additionalProperties: false },
-			),
-		),
-	},
-	{ additionalProperties: false },
-);
+	),
+};
+export const ProviderInstanceConfigSchema = Type.Union([
+	Type.Object(
+		{
+			...ProviderInstanceFields,
+			type: NonAnySearchProviderTypeSchema,
+		},
+		{ additionalProperties: false },
+	),
+	Type.Object(
+		{
+			...ProviderInstanceFields,
+			type: Type.Literal("anysearch"),
+			searchFilterMode: Type.Optional(SearchFilterModeSchema),
+		},
+		{ additionalProperties: false },
+	),
+]);
 
 export const SearchConfigSchema = Type.Object(
 	{

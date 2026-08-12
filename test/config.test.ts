@@ -9,6 +9,7 @@ import {
 	loadConfig,
 	resolveConfigPath,
 } from "../src/config/config.ts";
+import { executeDoctor, executeProviders } from "../src/core/diagnostics.ts";
 
 function configFile(value: unknown): { path: string; cleanup(): void } {
 	const directory = mkdtempSync(join(tmpdir(), "web-access-config-"));
@@ -57,6 +58,60 @@ test("配置拒绝未知字段与不存在的 route instance", () => {
 	} finally {
 		unknown.cleanup();
 		missing.cleanup();
+	}
+});
+
+test("AnySearch 配置支持匿名、标准环境变量和专属过滤模式", () => {
+	const fixture = configFile({
+		providers: [
+			{ id: "anysearch", type: "anysearch", searchFilterMode: "best_effort" },
+		],
+		search: { providers: ["anysearch"] },
+		extract: { providers: ["anysearch"] },
+	});
+	try {
+		const loaded = loadConfig(fixture.path, {
+			ANYSEARCH_BASE_URL: "https://custom.anysearch.test/",
+		});
+		const anysearch = loaded.instances.find((item) => item.id === "anysearch");
+		assert.equal(anysearch?.baseUrl, "https://custom.anysearch.test");
+		assert.equal(anysearch?.apiKey, null);
+		assert.equal(anysearch?.searchFilterMode, "best_effort");
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("非 AnySearch instance 拒绝 searchFilterMode", () => {
+	const fixture = configFile({
+		providers: [{ id: "http", type: "http", searchFilterMode: "strict" }],
+	});
+	try {
+		assert.throws(() => loadConfig(fixture.path, {}), /仅适用于 anysearch/);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("diagnostics 报告显式启用的匿名 AnySearch 可用及过滤模式", () => {
+	const fixture = configFile({
+		providers: [
+			{ id: "anysearch", type: "anysearch", searchFilterMode: "best_effort" },
+		],
+		search: { providers: ["anysearch"] },
+		extract: { providers: ["anysearch"] },
+	});
+	try {
+		const loaded = loadConfig(fixture.path, {});
+		const providers = executeProviders(loaded);
+		const item = (
+			providers.data as { providers: Array<Record<string, unknown>> }
+		).providers.find((provider) => provider.id === "anysearch");
+		assert.equal(item?.searchFilterMode, "best_effort");
+		assert.deepEqual(item?.routes, { search: true, extract: true });
+		assert.equal(executeDoctor(loaded).ok, true);
+	} finally {
+		fixture.cleanup();
 	}
 });
 

@@ -3,6 +3,7 @@ import type {
 	ProviderAdapter,
 	ProviderType,
 } from "../core/types.ts";
+import { ANYSEARCH_ADAPTER } from "./anysearch.ts";
 import { EXTRACT_ADAPTERS } from "./extract.ts";
 import { EXA_ADAPTER, SEARCH_ADAPTERS } from "./search.ts";
 
@@ -23,7 +24,10 @@ const adapters = [...SEARCH_ADAPTERS, ...EXTRACT_ADAPTERS].reduce<
 			});
 		return map;
 	},
-	new Map([[EXA_ADAPTER.type, EXA_ADAPTER]]),
+	new Map([
+		[EXA_ADAPTER.type, EXA_ADAPTER],
+		[ANYSEARCH_ADAPTER.type, ANYSEARCH_ADAPTER],
+	]),
 );
 
 export function getAdapter(

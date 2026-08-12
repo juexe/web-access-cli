@@ -60,13 +60,27 @@ function withProvider(
 
 function safeRaw(raw: unknown, instances: ProviderInstance[]): unknown {
 	const secrets = instances.map((instance) => instance.apiKey);
-	if (typeof raw === "string") return redactText(raw, secrets);
-	if (raw === undefined) return undefined;
-	try {
-		return JSON.parse(redactText(JSON.stringify(raw), secrets));
-	} catch {
-		return "[无法序列化的响应]";
+	const sensitive =
+		/^(?:auto[_-]?registered|api[_-]?key|password|username|user|email|access[_-]?token|refresh[_-]?token|authorization|cookie|client[_-]?secret)$/i;
+	const redact = (value: unknown): unknown => {
+		if (typeof value === "string") return redactText(value, secrets);
+		if (Array.isArray(value)) return value.map(redact);
+		if (value && typeof value === "object") {
+			const result: Record<string, unknown> = {};
+			for (const [key, item] of Object.entries(value))
+				result[key] = sensitive.test(key) ? "[REDACTED]" : redact(item);
+			return result;
+		}
+		return value;
+	};
+	if (typeof raw === "string") {
+		try {
+			return redact(JSON.parse(raw));
+		} catch {
+			return redact(raw);
+		}
 	}
+	return redact(raw);
 }
 
 function resolveInstances(

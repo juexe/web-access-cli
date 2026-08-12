@@ -5,7 +5,7 @@
 [![CI](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-一个 Agent-neutral 的网页能力 CLI。它把“搜索”和“网页正文提取”定义为稳定能力，把 Tavily、Exa、Brave、SearXNG、Firecrawl、Jina 等差异收敛到内部统一 schema。
+一个 Agent-neutral 的网页能力 CLI。它把“搜索”和“网页正文提取”定义为稳定能力，把 Tavily、Exa、Brave、SearXNG、AnySearch、Firecrawl、Jina 等差异收敛到内部统一 schema。
 
 CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCode 或其他 Agent。Skill、MCP 和 Agent 插件只能作为 CLI 上层 adapter 接入，不能污染核心能力和 Provider 实现。
 
@@ -13,8 +13,8 @@ CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCo
 
 | 能力 | Provider Type | 统一输出 |
 | --- | --- | --- |
-| `search` | Tavily、Exa、Brave、SearXNG | `rank`、`title`、`url`、`snippet` |
-| `extract` | Firecrawl v2、Jina Reader、Exa Contents、HTTP | Markdown `Document` |
+| `search` | Tavily、Exa、Brave、SearXNG、AnySearch | `rank`、`title`、`url`、`snippet` |
+| `extract` | Firecrawl v2、Jina Reader、Exa Contents、AnySearch、HTTP | Markdown `Document` |
 
 Provider Type 描述实现类型；Provider Instance 是一份可配置实例。一个 Type 可以有多个 Instance，例如 `exa_team` 和 `exa_personal`。Route 是有序 Instance ID 数组，既决定启用状态，也决定 `auto` 的尝试顺序。
 
@@ -90,7 +90,7 @@ web-access config edit
 web-access --config "/path/to/config.json" config edit
 ```
 
-CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两个诊断命令，以及 `config edit` 配置维护命令。当前版本不提供 batch/all、answer、PDF 专线、Node SDK 或 MCP。仓库提供可选的 [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md)，仅供源码仓库使用，不包含在 npm 发布包中。
+CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两个诊断命令，以及 `config edit` 配置维护命令。当前版本不提供 batch/all、answer、PDF 专线、Node SDK 或通用 MCP 集成。仓库提供可选的 [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md)，仅供源码仓库使用，不包含在 npm 发布包中。
 
 ### 通用选项
 
@@ -150,12 +150,14 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 }
 ```
 
-内置 Instance 为 `tavily`、`exa`、`brave`、`searxng`、`firecrawl`、`jina`、`http`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。只有出现在对应 `providers` Route 中的实例才启用。
+内置 Instance 为 `tavily`、`exa`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。只有出现在对应 `providers` Route 中的实例才启用。AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用。
 
 默认 Route：
 
 - Search：`tavily -> exa -> brave -> searxng`
 - Extract：`firecrawl -> jina -> exa -> http`
+
+AnySearch 同时支持 Search 和 Extract，但不在默认 Route 中。其 instance 可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。
 
 ### 凭据和 URL
 
@@ -170,6 +172,7 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 | Firecrawl | `FIRECRAWL_API_KEY` | `FIRECRAWL_BASE_URL` |
 | Jina | `JINA_API_KEY`，可选 | `JINA_BASE_URL` |
 | HTTP | 无 | 无 |
+| AnySearch | `ANYSEARCH_API_KEY`，可选 | `ANYSEARCH_BASE_URL`，默认 `https://api.anysearch.com` |
 
 自定义 Instance 使用 `apiKeyEnv` 和 `baseUrlEnv` 指定自己的环境变量。所有远端 Provider 都可以设置 `baseUrl` 和附加 `headers`。公共 `api.firecrawl.dev` 需要 key；自托管 Firecrawl v2 可以不设置 key。
 

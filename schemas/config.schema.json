@@ -8,75 +8,134 @@
     "providers": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": [
-          "id",
-          "type"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
-          },
-          "type": {
-            "anyOf": [
-              {
-                "type": "string",
-                "const": "tavily"
-              },
-              {
-                "type": "string",
-                "const": "exa"
-              },
-              {
-                "type": "string",
-                "const": "brave"
-              },
-              {
-                "type": "string",
-                "const": "searxng"
-              },
-              {
-                "type": "string",
-                "const": "firecrawl"
-              },
-              {
-                "type": "string",
-                "const": "jina"
-              },
-              {
-                "type": "string",
-                "const": "http"
-              }
-            ]
-          },
-          "apiKey": {
-            "type": "string"
-          },
-          "apiKeyEnv": {
-            "type": "string",
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-          },
-          "baseUrl": {
-            "type": "string",
-            "format": "uri"
-          },
-          "baseUrlEnv": {
-            "type": "string",
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-          },
-          "headers": {
+        "anyOf": [
+          {
             "type": "object",
-            "patternProperties": {
-              "^[^\\r\\n]+$": {
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
                 "type": "string",
-                "pattern": "^[^\\r\\n]*$"
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              },
+              "apiKey": {
+                "type": "string"
+              },
+              "apiKeyEnv": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "baseUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "baseUrlEnv": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "headers": {
+                "type": "object",
+                "patternProperties": {
+                  "^[^\\r\\n]+$": {
+                    "type": "string",
+                    "pattern": "^[^\\r\\n]*$"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "type": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "tavily"
+                  },
+                  {
+                    "type": "string",
+                    "const": "exa"
+                  },
+                  {
+                    "type": "string",
+                    "const": "brave"
+                  },
+                  {
+                    "type": "string",
+                    "const": "searxng"
+                  },
+                  {
+                    "type": "string",
+                    "const": "firecrawl"
+                  },
+                  {
+                    "type": "string",
+                    "const": "jina"
+                  },
+                  {
+                    "type": "string",
+                    "const": "http"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              },
+              "apiKey": {
+                "type": "string"
+              },
+              "apiKeyEnv": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "baseUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "baseUrlEnv": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "headers": {
+                "type": "object",
+                "patternProperties": {
+                  "^[^\\r\\n]+$": {
+                    "type": "string",
+                    "pattern": "^[^\\r\\n]*$"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "type": {
+                "type": "string",
+                "const": "anysearch"
+              },
+              "searchFilterMode": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "strict"
+                  },
+                  {
+                    "type": "string",
+                    "const": "best_effort"
+                  }
+                ]
               }
             },
             "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       }
     },
     "search": {

@@ -6,8 +6,12 @@ export const PROVIDER_TYPES = [
 	"firecrawl",
 	"jina",
 	"http",
+	"anysearch",
 ] as const;
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
+
+export const SEARCH_FILTER_MODES = ["strict", "best_effort"] as const;
+export type SearchFilterMode = (typeof SEARCH_FILTER_MODES)[number];
 
 export const CAPABILITIES = ["search", "extract"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
@@ -32,6 +36,7 @@ export interface ProviderInstanceConfig {
 	baseUrl?: string;
 	baseUrlEnv?: string;
 	headers?: Record<string, string>;
+	searchFilterMode?: SearchFilterMode;
 }
 
 export interface RouteConfig {
@@ -79,6 +84,7 @@ export interface ProviderInstance {
 		| "default"
 		| "missing";
 	headers: Record<string, string>;
+	searchFilterMode?: SearchFilterMode | null;
 }
 
 export interface ProviderRef {

@@ -160,6 +160,21 @@ export function normalizeDomains(values: string[]): string[] {
 	return result;
 }
 
+export function searchQueryWithDomains(
+	query: string,
+	includeDomains: string[],
+	excludeDomains: string[],
+): string {
+	const parts = [query];
+	if (includeDomains.length === 1) parts.push(`site:${includeDomains[0]}`);
+	else if (includeDomains.length > 1)
+		parts.push(
+			`(${includeDomains.map((domain) => `site:${domain}`).join(" OR ")})`,
+		);
+	for (const domain of excludeDomains) parts.push(`-site:${domain}`);
+	return parts.join(" ");
+}
+
 export function hostMatches(hostname: string, domain: string): boolean {
 	const host = hostname.toLowerCase().replace(/\.$/, "");
 	return host === domain || host.endsWith(`.${domain}`);
