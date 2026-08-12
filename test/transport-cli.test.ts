@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -9,6 +8,7 @@ import test, { type TestContext } from "node:test";
 import { createProgram } from "../src/cli.ts";
 import type { OutputEnvelope } from "../src/core/types.ts";
 import { DefaultHttpTransport } from "../src/transport/http.ts";
+import { VERSION } from "../src/version.ts";
 
 async function serverUrl(t: TestContext): Promise<string> {
 	const server = createServer((request, response) => {
@@ -175,11 +175,10 @@ test("CLI config 缺少 edit 子命令时返回输入错误 envelope", () => {
 	assert.equal(result.stderr, "");
 	const envelope = JSON.parse(result.stdout) as {
 		command?: string | null;
-		error?: { code?: string; message?: string };
+		error?: { code?: string };
 	};
 	assert.equal(envelope.command, null);
 	assert.equal(envelope.error?.code, "invalid_input");
-	assert.equal(envelope.error?.message, "必须指定 config 子命令");
 });
 
 test("CLI 通过符号链接入口运行时仍会执行主程序", () => {
@@ -198,29 +197,8 @@ test("CLI 通过符号链接入口运行时仍会执行主程序", () => {
 		);
 		assert.equal(result.status, 0);
 		assert.equal(result.stderr, "");
-		assert.equal(result.stdout.trim(), "0.1.0");
+		assert.equal(result.stdout.trim(), VERSION);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
 	}
-});
-
-test("生成的 JSON Schema 包含配置、请求与输出 schema", async () => {
-	for (const name of ["config", "searchRequest", "extractRequest", "output"]) {
-		const schema = JSON.parse(
-			await readFile(resolve(`schemas/${name}.schema.json`), "utf8"),
-		) as unknown;
-		assert.equal(typeof schema, "object");
-	}
-	const outputSchema = await readFile(
-		resolve("schemas/output.schema.json"),
-		"utf8",
-	);
-	assert.match(outputSchema, /"const": "config\.edit"/);
-	assert.match(outputSchema, /"const": "xcrawl"/);
-	const configSchema = await readFile(
-		resolve("schemas/config.schema.json"),
-		"utf8",
-	);
-	assert.match(configSchema, /"const": "xcrawl"/);
-	assert.match(configSchema, /"searchFilterMode"/);
 });

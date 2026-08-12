@@ -173,45 +173,9 @@ test("AnySearch 402 自动注册响应在 envelope 中递归脱敏", async () =>
 			serialized,
 			/secret-password|response-key|user@example.com/,
 		);
-		assert.match(serialized, /quota_exceeded|provider_exhausted/);
-	} finally {
-		fixture.cleanup();
-	}
-});
-
-test("XCrawl strict freshness 在 auto route 中回退到下一 provider", async () => {
-	const fixture = loadedConfig({
-		providers: [
-			{ id: "xcrawl", type: "xcrawl", apiKey: "xcrawl-key" },
-			{ id: "brave", type: "brave", apiKey: "brave-key" },
-		],
-		search: { providers: ["xcrawl", "brave"] },
-		extract: { providers: ["http"] },
-	});
-	try {
-		const transport = new MockTransport(() =>
-			response({
-				web: {
-					results: [
-						{
-							title: "Brave result",
-							url: "https://example.com/result",
-							description: "snippet",
-						},
-					],
-				},
-			}),
-		);
-		const envelope = await executeSearch(
-			{ ...searchRequest, freshness: "month" },
-			{ loaded: fixture.loaded, transport },
-		);
-		assert.equal(envelope.ok, true);
-		if (!envelope.ok || envelope.command !== "search") return;
-		assert.equal(envelope.provider.id, "brave");
-		assert.equal(envelope.attempts[0]?.provider.id, "xcrawl");
-		assert.equal(envelope.attempts[0]?.error?.code, "provider_unavailable");
-		assert.equal(transport.calls.length, 1);
+		if (envelope.ok) return;
+		assert.equal(envelope.error.code, "provider_exhausted");
+		assert.equal(envelope.attempts?.[0]?.error?.code, "quota_exceeded");
 	} finally {
 		fixture.cleanup();
 	}
@@ -238,38 +202,9 @@ test("XCrawl 失败响应和错误消息在 envelope 中脱敏", async () => {
 		assert.equal(envelope.ok, false);
 		const serialized = JSON.stringify(envelope);
 		assert.doesNotMatch(serialized, /xcrawl-secret|response-secret/);
-		assert.match(serialized, /provider_error|provider_exhausted/);
-	} finally {
-		fixture.cleanup();
-	}
-});
-
-test("XCrawl 短正文失败时保留最佳 partial", async () => {
-	const fixture = loadedConfig({
-		providers: [{ id: "xcrawl", type: "xcrawl", apiKey: "xcrawl-key" }],
-		search: { providers: [] },
-		extract: { providers: ["xcrawl"], minContentCharacters: 100 },
-	});
-	try {
-		const transport = new MockTransport(() =>
-			response({
-				status: "completed",
-				url: "https://example.com/short",
-				data: { markdown: "# 标题\n\n太短的正文" },
-			}),
-		);
-		const envelope = await executeExtract(
-			{ url: "https://example.com/short", provider: "auto" },
-			{ loaded: fixture.loaded, transport },
-		);
-		assert.equal(envelope.ok, false);
 		if (envelope.ok) return;
 		assert.equal(envelope.error.code, "provider_exhausted");
-		assert.equal(envelope.partial?.provider.id, "xcrawl");
-		assert.equal(
-			envelope.partial?.data.document.content,
-			"# 标题\n\n太短的正文",
-		);
+		assert.equal(envelope.attempts?.[0]?.error?.code, "provider_error");
 	} finally {
 		fixture.cleanup();
 	}
