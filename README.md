@@ -154,10 +154,10 @@ The built-in instances are `tavily`, `exa`, `brave`, `searxng`, `firecrawl`, `ji
 
 Default routes:
 
-- Search: `tavily -> exa -> brave -> searxng`
-- Extract: `firecrawl -> jina -> exa -> http`
+- Search: `tavily -> exa -> brave -> searxng -> anysearch -> xcrawl`
+- Extract: `firecrawl -> jina -> exa -> anysearch -> xcrawl -> http`
 
-AnySearch and XCrawl support both Search and Extract but are not in either default route. Both instance types accept `searchFilterMode`: `strict` (default; freshness skips the provider) or `best_effort` (rewrites freshness into a query fragment). Domain constraints are rewritten into the query and strictly re-applied locally. XCrawl Extract always uses synchronous Scrape with Markdown output; Map, Crawl, and asynchronous jobs are outside the current CLI capabilities.
+The default routes include every built-in instance that supports the corresponding capability. Custom instance IDs are merged into the instance list but must still be added to routes explicitly. An omitted route uses the defaults above, while an explicit empty array disables that capability. In `auto` mode, incompletely configured instances are skipped; AnySearch can be called anonymously with its default base URL, and XCrawl is skipped until an API key is configured. Both instance types accept `searchFilterMode`: `strict` (default; freshness skips the provider) or `best_effort` (rewrites freshness into a query fragment). Domain constraints are rewritten into the query and strictly re-applied locally. XCrawl Extract always uses synchronous Scrape with Markdown output; Map, Crawl, and asynchronous jobs are outside the current CLI capabilities.
 
 ### Credentials and URLs
 

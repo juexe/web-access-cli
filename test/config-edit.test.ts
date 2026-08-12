@@ -59,14 +59,14 @@ test("config edit 创建完整默认配置后再调用系统打开器", async (t
 		{ id: "xcrawl", type: "xcrawl", searchFilterMode: "strict" },
 	]);
 	assert.deepEqual(parsed.search, {
-		providers: ["tavily", "exa", "brave", "searxng"],
+		providers: ["tavily", "exa", "brave", "searxng", "anysearch", "xcrawl"],
 		limit: 5,
 		timeoutMs: 60_000,
 		attemptTimeoutMs: 20_000,
 		maxResponseBytes: 5 * 1024 * 1024,
 	});
 	assert.deepEqual(parsed.extract, {
-		providers: ["firecrawl", "jina", "exa", "http"],
+		providers: ["firecrawl", "jina", "exa", "anysearch", "xcrawl", "http"],
 		timeoutMs: 120_000,
 		attemptTimeoutMs: 45_000,
 		maxResponseBytes: 5 * 1024 * 1024,

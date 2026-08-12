@@ -1,6 +1,6 @@
 # ADR 0006：AnySearch Provider 协议映射
 
-- 状态：已接受
+- 状态：已接受；默认 Route 条款由 ADR 0008 取代
 - 日期：2026-08-12
 
 ## 背景
@@ -11,7 +11,7 @@ AnySearch 为搜索提供结构化 REST 接口，为提取提供固定的 JSON-R
 
 新增内置 `anysearch` Provider Type，adapter 使用 `POST /v1/search` 和 `POST /mcp`，所有请求复用统一 `HttpTransport`。Extract 只实现官方 Skill 当前使用的固定 `extract` 工具调用，不引入 MCP SDK、会话初始化、工具发现、SSE/stdio 或通用 MCP 集成。
 
-AnySearch 不加入默认 Route。Search 的 `searchFilterMode` 为 instance 专属配置：`strict` 遇到 freshness 时返回可回退的 `provider_unavailable`；`best_effort` 将日期和域名条件改写为查询，并在本地再次严格过滤。匿名调用允许存在 base URL 即可。
+AnySearch 初始不加入默认 Route；该默认 Route 条款后由 ADR 0008 取代。Search 的 `searchFilterMode` 为 instance 专属配置：`strict` 遇到 freshness 时返回可回退的 `provider_unavailable`；`best_effort` 将日期和域名条件改写为查询，并在本地再次严格过滤。匿名调用允许存在 base URL 即可。
 
 ## 结果
 

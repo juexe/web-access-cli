@@ -39,12 +39,12 @@ description: 使用 web-access CLI 搜索实时网页信息、查找来源，并
 
 默认 Route：
 
-- Search：`tavily -> exa -> brave -> searxng`
-- Extract：`firecrawl -> jina -> exa -> http`
+- Search：`tavily -> exa -> brave -> searxng -> anysearch -> xcrawl`
+- Extract：`firecrawl -> jina -> exa -> anysearch -> xcrawl -> http`
 
-AnySearch 同时支持两个能力，但必须显式加入 Route。其 `searchFilterMode` 默认为 `strict`；`best_effort` 会把 freshness 改写为查询片段。配置 base URL 后允许匿名调用。
+默认 Route 包含支持对应能力的全部内置 Instance；缺少必要配置的 Instance 会被 `auto` 跳过，自定义 ID 仍需显式加入 Route。AnySearch 的 `searchFilterMode` 默认为 `strict`；`best_effort` 会把 freshness 改写为查询片段。使用默认 base URL 时允许匿名调用。
 
-XCrawl 同时支持两个能力，但必须显式加入 Route，并配置 `XCRAWL_API_KEY`。其 `searchFilterMode` 默认为 `strict`；`best_effort` 会把 freshness 改写为查询片段。Extract 只使用同步 Markdown Scrape，不提供 Map、Crawl 或异步任务接口。
+XCrawl 默认进入两个 Route，但必须配置 `XCRAWL_API_KEY` 才会实际调用。其 `searchFilterMode` 默认为 `strict`；`best_effort` 会把 freshness 改写为查询片段。Extract 只使用同步 Markdown Scrape，不提供 Map、Crawl 或异步任务接口。
 
 ## 搜索网页
 

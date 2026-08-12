@@ -154,10 +154,10 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 
 默认 Route：
 
-- Search：`tavily -> exa -> brave -> searxng`
-- Extract：`firecrawl -> jina -> exa -> http`
+- Search：`tavily -> exa -> brave -> searxng -> anysearch -> xcrawl`
+- Extract：`firecrawl -> jina -> exa -> anysearch -> xcrawl -> http`
 
-AnySearch 和 XCrawl 同时支持 Search 与 Extract，但都不在默认 Route 中。两类 instance 均可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
+默认 Route 包含支持对应 Capability 的全部内置 Instance。自定义 ID 会合并到 Instance 列表，但仍需显式加入 Route；省略 Route 时使用上述默认值，显式空数组则禁用对应能力。`auto` 会跳过未完成配置的 Instance；AnySearch 使用默认 base URL 时可匿名调用，XCrawl 则在配置 API key 前被跳过。两类 Instance 均可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
 
 ### 凭据和 URL
 

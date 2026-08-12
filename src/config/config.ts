@@ -21,11 +21,15 @@ export const DEFAULT_SEARCH_PROVIDERS = [
 	"exa",
 	"brave",
 	"searxng",
+	"anysearch",
+	"xcrawl",
 ] as const;
 export const DEFAULT_EXTRACT_PROVIDERS = [
 	"firecrawl",
 	"jina",
 	"exa",
+	"anysearch",
+	"xcrawl",
 	"http",
 ] as const;
 export const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;

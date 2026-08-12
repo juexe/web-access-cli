@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
 	ConfigError,
+	capabilitySupports,
 	getDefaultConfigPath,
 	loadConfig,
 	resolveConfigPath,
@@ -148,6 +149,102 @@ test("不支持过滤策略的 instance 拒绝 searchFilterMode", () => {
 	}
 });
 
+test("providers 省略或为空时合并全部内置 instance，自定义 id 只追加配置", () => {
+	const omitted = configFile({});
+	const empty = configFile({ providers: [] });
+	const custom = configFile({ providers: [{ id: "exa_team", type: "exa" }] });
+	const builtinIds = [
+		"tavily",
+		"exa",
+		"brave",
+		"searxng",
+		"firecrawl",
+		"jina",
+		"http",
+		"anysearch",
+		"xcrawl",
+	];
+	try {
+		assert.deepEqual(
+			loadConfig(omitted.path, {}).instances.map((item) => item.id),
+			builtinIds,
+		);
+		assert.deepEqual(
+			loadConfig(empty.path, {}).instances.map((item) => item.id),
+			builtinIds,
+		);
+		const customized = loadConfig(custom.path, {});
+		assert.deepEqual(
+			customized.instances.map((item) => item.id),
+			[...builtinIds, "exa_team"],
+		);
+		assert.equal(customized.app.search.providers.includes("exa_team"), false);
+		assert.equal(customized.app.extract.providers.includes("exa_team"), false);
+	} finally {
+		omitted.cleanup();
+		empty.cleanup();
+		custom.cleanup();
+	}
+});
+
+test("缺省 route 覆盖全部支持能力的内置 provider，显式空 route 保持禁用", () => {
+	const defaults = configFile({});
+	const disabled = configFile({
+		search: { providers: [] },
+		extract: { providers: [] },
+	});
+	try {
+		const loaded = loadConfig(defaults.path, {});
+		assert.deepEqual(loaded.app.search.providers, [
+			"tavily",
+			"exa",
+			"brave",
+			"searxng",
+			"anysearch",
+			"xcrawl",
+		]);
+		assert.deepEqual(loaded.app.extract.providers, [
+			"firecrawl",
+			"jina",
+			"exa",
+			"anysearch",
+			"xcrawl",
+			"http",
+		]);
+		const providerDiagnostics = (
+			executeProviders(loaded).data as {
+				providers: Array<{
+					id: string;
+					routes: { search: boolean; extract: boolean };
+				}>;
+			}
+		).providers;
+		for (const id of ["anysearch", "xcrawl"]) {
+			assert.deepEqual(
+				providerDiagnostics.find((provider) => provider.id === id)?.routes,
+				{ search: true, extract: true },
+			);
+		}
+		for (const capability of ["search", "extract"] as const) {
+			const route =
+				capability === "search"
+					? loaded.app.search.providers
+					: loaded.app.extract.providers;
+			const supported = loaded.instances
+				.filter((instance) => capabilitySupports(instance.type, capability))
+				.map((instance) => instance.id);
+			assert.equal(new Set(route).size, route.length);
+			assert.deepEqual([...route].sort(), supported.sort());
+		}
+		const emptyRoutes = loadConfig(disabled.path, {});
+		assert.deepEqual(emptyRoutes.app.search.providers, []);
+		assert.deepEqual(emptyRoutes.app.extract.providers, []);
+	} finally {
+		defaults.cleanup();
+		disabled.cleanup();
+	}
+});
+
 test("只读取显式或用户级配置路径", () => {
 	const resolved = resolveConfigPath("./nested/config.json", {});
 	assert.equal(resolved, join(process.cwd(), "nested", "config.json"));
@@ -170,11 +267,15 @@ test("只读取显式或用户级配置路径", () => {
 			"exa",
 			"brave",
 			"searxng",
+			"anysearch",
+			"xcrawl",
 		]);
 		assert.deepEqual(loaded.app.extract.providers, [
 			"firecrawl",
 			"jina",
 			"exa",
+			"anysearch",
+			"xcrawl",
 			"http",
 		]);
 		assert.equal(
