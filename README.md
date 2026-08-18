@@ -22,26 +22,26 @@ A provider type describes an implementation, while a provider instance is a conf
 
 Node.js 22.19 or later is required.
 
-The npm package has not been published yet. Build and run the CLI from source:
+Install the CLI from npm:
 
 ```sh
-git clone https://github.com/Juexe/web-access-cli.git
-cd web-access-cli
-pnpm install --frozen-lockfile
-pnpm build
-node dist/cli.js --help
-```
-
-After building, an optional global installation can point to the absolute repository path:
-
-```sh
-pnpm add --global <absolute-path-to-web-access-cli>
+npm install --global web-access-cli
 web-access --help
 ```
 
-For development in this repository:
+Alternatively, install it with pnpm:
 
 ```sh
+pnpm add --global web-access-cli
+web-access --help
+```
+
+For development from source:
+
+```sh
+git clone https://github.com/juexe/web-access-cli.git
+cd web-access-cli
+pnpm install --frozen-lockfile
 pnpm check
 pnpm pack:check
 ```

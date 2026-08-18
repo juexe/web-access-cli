@@ -1,0 +1,99 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出发布标签
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.16.0
+      - name: 安装 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.15.0
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 运行完整检查
+        run: pnpm check
+      - name: 确认生成 Schema 已提交
+        run: git diff --exit-code -- schemas/
+      - name: 构建发布包
+        run: pnpm pack:check
+      - name: 验证发布上下文
+        id: release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor HEAD origin/main
+
+          package_name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          test "$RELEASE_TAG" = "v$version"
+          test "$(node dist/cli.js --version)" = "$version"
+
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            case "$version" in
+              *-*) dist_tag=next ;;
+              *) echo "GitHub prerelease 必须使用 SemVer prerelease 版本" >&2; exit 1 ;;
+            esac
+          else
+            case "$version" in
+              *-*) echo "正式 GitHub Release 不能发布 prerelease 版本" >&2; exit 1 ;;
+              *) dist_tag=latest ;;
+            esac
+          fi
+
+          archive=".artifacts/$package_name-$version.tgz"
+          test -f "$archive"
+          if npm view "$package_name@$version" version --json >/dev/null 2>&1; then
+            echo "$package_name@$version 已存在，拒绝重复发布" >&2
+            exit 1
+          fi
+
+          {
+            echo "archive=$archive"
+            echo "dist_tag=$dist_tag"
+            echo "package_name=$package_name"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+      - name: 安装发布版 npm CLI
+        run: npm install --global npm@12.0.2
+      - name: 发布到 npm
+        run: npm publish "${{ steps.release.outputs.archive }}" --access public --tag "${{ steps.release.outputs.dist_tag }}"
+      - name: 验证 npm 注册表
+        shell: bash
+        run: |
+          for _ in {1..12}; do
+            actual="$(npm view '${{ steps.release.outputs.package_name }}@${{ steps.release.outputs.version }}' version --json 2>/dev/null | tr -d '"' || true)"
+            if [ "$actual" = "${{ steps.release.outputs.version }}" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "npm 注册表未在预期时间内返回已发布版本；重试工作流前必须先人工核验" >&2
+          exit 1

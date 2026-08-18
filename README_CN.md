@@ -22,26 +22,26 @@ Provider Type 描述实现类型；Provider Instance 是一份可配置实例。
 
 要求 Node.js 22.19 或更高版本。
 
-npm 包尚未发布。当前请从源码构建并运行：
+从 npm 全局安装：
 
 ```sh
-git clone https://github.com/Juexe/web-access-cli.git
-cd web-access-cli
-pnpm install --frozen-lockfile
-pnpm build
-node dist/cli.js --help
-```
-
-构建完成后，也可以使用仓库绝对路径安装为全局命令：
-
-```sh
-pnpm add --global <web-access-cli 仓库绝对路径>
+npm install --global web-access-cli
 web-access --help
 ```
 
-在仓库中开发：
+也可以使用 pnpm 安装：
 
 ```sh
+pnpm add --global web-access-cli
+web-access --help
+```
+
+从源码开发：
+
+```sh
+git clone https://github.com/juexe/web-access-cli.git
+cd web-access-cli
+pnpm install --frozen-lockfile
 pnpm check
 pnpm pack:check
 ```
