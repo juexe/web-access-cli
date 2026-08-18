@@ -5,11 +5,11 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/Juexe/web-access-cli.git"
+		"url": "git+https://github.com/juexe/web-access-cli.git"
 	},
-	"homepage": "https://github.com/Juexe/web-access-cli#readme",
+	"homepage": "https://github.com/juexe/web-access-cli#readme",
 	"bugs": {
-		"url": "https://github.com/Juexe/web-access-cli/issues"
+		"url": "https://github.com/juexe/web-access-cli/issues"
 	},
 	"keywords": [
 		"cli",
@@ -19,7 +19,7 @@
 	],
 	"type": "module",
 	"bin": {
-		"web-access": "./dist/cli.js"
+		"web-access": "dist/cli.js"
 	},
 	"files": [
 		"dist",
@@ -29,18 +29,23 @@
 		"LICENSE",
 		"THIRD_PARTY_NOTICES.md"
 	],
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	},
 	"engines": {
 		"node": ">=22.19.0"
 	},
 	"packageManager": "pnpm@11.16.0",
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json && node scripts/write-schemas.mjs",
+		"prepack": "pnpm build",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
 		"test": "tsx --test test/**/*.test.ts",
 		"lint": "biome check .",
 		"format": "biome format --write .",
 		"check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
-		"pack:check": "pnpm build && pnpm pack --pack-destination .artifacts"
+		"pack:check": "pnpm pack --pack-destination .artifacts"
 	},
 	"dependencies": {
 		"@mozilla/readability": "^0.6.0",

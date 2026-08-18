@@ -88,3 +88,21 @@ jobs:
           for required in package/dist/cli.js package/schemas/config.schema.json package/schemas/extractRequest.schema.json package/schemas/output.schema.json package/schemas/searchRequest.schema.json package/LICENSE package/package.json package/README.md package/README_CN.md package/THIRD_PARTY_NOTICES.md; do
             grep -Fxq "$required" <<< "$contents"
           done
+      - name: 验证打包后的 CLI
+        shell: bash
+        run: |
+          archive="$(find .artifacts -maxdepth 1 -name '*.tgz' -print -quit)"
+          install_dir="$(mktemp -d)"
+          trap 'rm -rf "$install_dir"' EXIT
+          pnpm --dir "$install_dir" add "$PWD/$archive" --ignore-scripts
+          cli="$install_dir/node_modules/.bin/web-access"
+          expected_version="$(node -p "require('./package.json').version")"
+          test "$("$cli" --version)" = "$expected_version"
+
+          set +e
+          stdout="$("$cli" extract 'ftp://example.com' 2>"$install_dir/stderr.txt")"
+          status=$?
+          set -e
+          test "$status" -eq 2
+          test ! -s "$install_dir/stderr.txt"
+          node -e 'const value = JSON.parse(process.argv[1]); if (value.ok !== false || value.error?.code !== "invalid_input") process.exit(1)' "$stdout"
