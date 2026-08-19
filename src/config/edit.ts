@@ -10,7 +10,10 @@ import {
 import { dirname } from "node:path";
 import open from "open";
 import { WebAccessError } from "../core/errors.ts";
-import type { ConfigEditSuccessEnvelope } from "../core/types.ts";
+import {
+	type ConfigEditSuccessEnvelope,
+	OUTPUT_SCHEMA_VERSION,
+} from "../core/types.ts";
 import { VERSION } from "../version.ts";
 import {
 	ConfigError,
@@ -164,7 +167,7 @@ export async function executeConfigEdit(
 	}
 
 	return {
-		schemaVersion: 1,
+		schemaVersion: OUTPUT_SCHEMA_VERSION,
 		ok: true,
 		command: "config.edit",
 		durationMs: elapsed(started, now),

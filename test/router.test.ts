@@ -5,7 +5,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { type LoadedConfig, loadConfig } from "../src/config/config.ts";
 import { executeExtract, executeSearch } from "../src/core/router.ts";
-import type { ExtractRequest, SearchRequest } from "../src/core/types.ts";
+import type {
+	ExtractRequest,
+	OutputEnvelope,
+	SearchRequest,
+} from "../src/core/types.ts";
 import { MockTransport, response } from "./helpers.ts";
 
 function loadedConfig(value: unknown): {
@@ -28,6 +32,12 @@ const searchRequest: SearchRequest = {
 	includeDomains: [],
 	excludeDomains: [],
 };
+
+function hasProvider(
+	envelope: OutputEnvelope,
+): envelope is Extract<OutputEnvelope, { provider: unknown }> {
+	return envelope.ok && "provider" in envelope;
+}
 
 test("auto 跳过未配置 instance，并按 route 回退到下一 provider", async () => {
 	const fixture = loadedConfig({
@@ -52,15 +62,19 @@ test("auto 跳过未配置 instance，并按 route 回退到下一 provider", as
 		const envelope = await executeSearch(searchRequest, {
 			loaded: fixture.loaded,
 			transport,
+			debug: true,
 		});
 		assert.equal(envelope.ok, true);
-		if (!envelope.ok || envelope.command !== "search") return;
-		assert.equal(envelope.provider.id, "brave");
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "brave");
 		assert.deepEqual(
-			envelope.attempts.map((attempt) => attempt.status),
+			envelope.debug?.attempts.map((attempt) => attempt.status),
 			["failed", "success"],
 		);
-		assert.equal(envelope.attempts[0]?.error?.code, "provider_unavailable");
+		assert.equal(
+			envelope.debug?.attempts[0]?.error?.code,
+			"provider_unavailable",
+		);
 	} finally {
 		fixture.cleanup();
 	}
@@ -78,7 +92,7 @@ test("显式 provider 严格执行，不触发 fallback", async () => {
 			{ loaded: fixture.loaded, transport },
 		);
 		assert.equal(envelope.ok, false);
-		if (envelope.ok) return;
+		if (envelope.ok || "command" in envelope) return;
 		assert.equal(envelope.error.code, "provider_unavailable");
 		assert.equal(envelope.attempts?.length, 1);
 		assert.equal(transport.calls.length, 0);
@@ -106,13 +120,14 @@ test("auto 全部失败时返回 provider_exhausted 与最佳 partial", async ()
 		const envelope = await executeExtract(request, {
 			loaded: fixture.loaded,
 			transport,
+			debug: true,
 		});
 		assert.equal(envelope.ok, false);
-		if (envelope.ok) return;
+		if (envelope.ok || "command" in envelope) return;
 		assert.equal(envelope.error.code, "provider_exhausted");
-		assert.equal(envelope.partial?.provider.id, "http");
+		assert.equal(envelope.partial?.provider, "http");
 		assert.equal(envelope.partial?.data.document.content, "太短的正文");
-		assert.equal(envelope.raw, "太短的正文");
+		assert.equal(envelope.debug?.raw, "太短的正文");
 	} finally {
 		fixture.cleanup();
 	}
@@ -165,7 +180,7 @@ test("AnySearch 402 自动注册响应在 envelope 中递归脱敏", async () =>
 	try {
 		const envelope = await executeSearch(
 			{ ...searchRequest, provider: "auto" },
-			{ loaded: fixture.loaded, transport },
+			{ loaded: fixture.loaded, transport, debug: true },
 		);
 		assert.equal(envelope.ok, false);
 		const serialized = JSON.stringify(envelope);
@@ -173,9 +188,13 @@ test("AnySearch 402 自动注册响应在 envelope 中递归脱敏", async () =>
 			serialized,
 			/secret-password|response-key|user@example.com/,
 		);
-		if (envelope.ok) return;
+		if (envelope.ok || "command" in envelope) return;
 		assert.equal(envelope.error.code, "provider_exhausted");
-		assert.equal(envelope.attempts?.[0]?.error?.code, "quota_exceeded");
+		assert.equal(envelope.attempts?.[0]?.code, "quota_exceeded");
+		assert.doesNotMatch(
+			JSON.stringify(envelope.debug?.raw),
+			/secret-password|response-key|user@example.com/,
+		);
 	} finally {
 		fixture.cleanup();
 	}
@@ -198,13 +217,18 @@ test("XCrawl 失败响应和错误消息在 envelope 中脱敏", async () => {
 		const envelope = await executeSearch(searchRequest, {
 			loaded: fixture.loaded,
 			transport,
+			debug: true,
 		});
 		assert.equal(envelope.ok, false);
 		const serialized = JSON.stringify(envelope);
 		assert.doesNotMatch(serialized, /xcrawl-secret|response-secret/);
-		if (envelope.ok) return;
+		if (envelope.ok || "command" in envelope) return;
 		assert.equal(envelope.error.code, "provider_exhausted");
-		assert.equal(envelope.attempts?.[0]?.error?.code, "provider_error");
+		assert.equal(envelope.attempts?.[0]?.code, "provider_error");
+		assert.doesNotMatch(
+			JSON.stringify(envelope.debug?.raw),
+			/xcrawl-secret|response-secret/,
+		);
 	} finally {
 		fixture.cleanup();
 	}
@@ -242,16 +266,20 @@ test("auto 仅在前序失败后调用 DeepSeek", async () => {
 		const envelope = await executeSearch(searchRequest, {
 			loaded: fixture.loaded,
 			transport,
+			debug: true,
 		});
 		assert.equal(envelope.ok, true);
-		if (!envelope.ok || envelope.command !== "search") return;
-		assert.equal(envelope.provider.id, "deepseek");
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "deepseek");
 		assert.doesNotMatch(
-			JSON.stringify(envelope.raw),
+			JSON.stringify(envelope.debug?.raw),
 			/encrypted_content|opaque-provider-payload/,
 		);
 		assert.deepEqual(
-			envelope.attempts.map((attempt) => [attempt.provider.id, attempt.status]),
+			envelope.debug?.attempts.map((attempt) => [
+				attempt.provider.id,
+				attempt.status,
+			]),
 			[
 				["brave", "failed"],
 				["deepseek", "success"],
@@ -302,13 +330,14 @@ test("auto 对最终非 2xx HTTP 响应切换到下一 provider", async (t) => {
 				const envelope = await executeSearch(searchRequest, {
 					loaded: fixture.loaded,
 					transport,
+					debug: true,
 				});
 				assert.equal(envelope.ok, true);
-				if (!envelope.ok || envelope.command !== "search") return;
-				assert.equal(envelope.provider.id, "brave");
+				if (!hasProvider(envelope)) return;
+				assert.equal(envelope.provider, "brave");
 				assert.equal(transport.calls.length, 2);
 				assert.deepEqual(
-					envelope.attempts.map((attempt) => [
+					envelope.debug?.attempts.map((attempt) => [
 						attempt.provider.id,
 						attempt.status,
 					]),
@@ -317,9 +346,15 @@ test("auto 对最终非 2xx HTTP 响应切换到下一 provider", async (t) => {
 						["brave", "success"],
 					],
 				);
-				assert.equal(envelope.attempts[0]?.error?.code, item.code);
-				assert.equal(envelope.attempts[0]?.error?.httpStatus, item.status);
-				assert.equal(envelope.attempts[0]?.error?.retryable, item.retryable);
+				assert.equal(envelope.debug?.attempts[0]?.error?.code, item.code);
+				assert.equal(
+					envelope.debug?.attempts[0]?.error?.httpStatus,
+					item.status,
+				);
+				assert.equal(
+					envelope.debug?.attempts[0]?.error?.retryable,
+					item.retryable,
+				);
 			} finally {
 				fixture.cleanup();
 			}
@@ -345,13 +380,13 @@ test("extract auto 在前序 provider 返回非 2xx 后继续 route", async () =
 		});
 		const envelope = await executeExtract(
 			{ url: "https://example.com/article", provider: "auto" },
-			{ loaded: fixture.loaded, transport },
+			{ loaded: fixture.loaded, transport, debug: true },
 		);
 		assert.equal(envelope.ok, true);
-		if (!envelope.ok || envelope.command !== "extract") return;
-		assert.equal(envelope.provider.id, "http");
-		assert.equal(envelope.attempts[0]?.error?.code, "auth_error");
-		assert.equal(envelope.attempts[0]?.error?.retryable, false);
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "http");
+		assert.equal(envelope.debug?.attempts[0]?.error?.code, "auth_error");
+		assert.equal(envelope.debug?.attempts[0]?.error?.retryable, false);
 		assert.equal(transport.calls.length, 2);
 	} finally {
 		fixture.cleanup();
@@ -376,33 +411,18 @@ test("auto 因非 2xx 耗尽 route 时返回 provider_exhausted", async () => {
 			transport,
 		});
 		assert.equal(envelope.ok, false);
-		if (envelope.ok) return;
+		if (envelope.ok || "command" in envelope) return;
 		assert.equal(envelope.error.code, "provider_exhausted");
 		assert.equal(envelope.error.retryable, false);
 		assert.equal(envelope.attempts?.length, 2);
 		assert.deepEqual(
-			envelope.attempts?.map((attempt) => [
-				attempt.error?.code,
-				attempt.error?.httpStatus,
-				attempt.error?.retryable,
-			]),
+			envelope.attempts?.map((attempt) => [attempt.code, attempt.httpStatus]),
 			[
-				["auth_error", 401, false],
-				["auth_error", 401, false],
+				["auth_error", 401],
+				["auth_error", 401],
 			],
 		);
-		assert.equal(
-			(
-				envelope.error.details as {
-					lastError?: {
-						code?: string;
-						httpStatus?: number;
-						retryable?: boolean;
-					};
-				}
-			)?.lastError?.code,
-			"auth_error",
-		);
+		assert.equal("details" in envelope.error, false);
 		assert.equal(transport.calls.length, 2);
 	} finally {
 		fixture.cleanup();
@@ -427,7 +447,7 @@ test("显式 provider 的非 2xx 响应不触发 fallback", async () => {
 			{ loaded: fixture.loaded, transport },
 		);
 		assert.equal(envelope.ok, false);
-		if (envelope.ok) return;
+		if (envelope.ok || "command" in envelope) return;
 		assert.equal(envelope.error.code, "auth_error");
 		assert.equal(envelope.error.retryable, false);
 		assert.equal(envelope.attempts?.length, 1);
@@ -452,11 +472,11 @@ test("auto 不扩大 HTTP 2xx 内嵌业务错误的回退范围", async () => {
 			transport,
 		});
 		assert.equal(envelope.ok, false);
-		if (envelope.ok) return;
+		if (envelope.ok || "command" in envelope) return;
 		assert.equal(envelope.error.code, "auth_error");
 		assert.equal(envelope.error.retryable, false);
 		assert.equal(envelope.attempts?.length, 1);
-		assert.equal(envelope.attempts?.[0]?.provider.id, "anysearch");
+		assert.equal(envelope.attempts?.[0]?.provider, "anysearch");
 		assert.equal(transport.calls.length, 1);
 	} finally {
 		fixture.cleanup();
@@ -489,10 +509,11 @@ test("auto 在前序成功时不调用 DeepSeek", async () => {
 		const envelope = await executeSearch(searchRequest, {
 			loaded: fixture.loaded,
 			transport,
+			debug: true,
 		});
 		assert.equal(envelope.ok, true);
-		if (!envelope.ok || envelope.command !== "search") return;
-		assert.equal(envelope.provider.id, "brave");
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "brave");
 		assert.equal(transport.calls.length, 1);
 	} finally {
 		fixture.cleanup();
@@ -511,10 +532,10 @@ test("DeepSeek 缺 key 时在 auto 中记录 unavailable 且不发请求", async
 			transport,
 		});
 		assert.equal(envelope.ok, false);
-		if (envelope.ok) return;
+		if (envelope.ok || "command" in envelope) return;
 		assert.equal(envelope.error.code, "provider_exhausted");
-		assert.equal(envelope.attempts?.[0]?.provider.id, "deepseek");
-		assert.equal(envelope.attempts?.[0]?.error?.code, "provider_unavailable");
+		assert.equal(envelope.attempts?.[0]?.provider, "deepseek");
+		assert.equal(envelope.attempts?.[0]?.code, "provider_unavailable");
 		assert.equal(transport.calls.length, 0);
 	} finally {
 		fixture.cleanup();
@@ -539,13 +560,75 @@ test("DeepSeek failure raw 与 envelope 不泄漏 API key", async () => {
 		const envelope = await executeSearch(searchRequest, {
 			loaded: fixture.loaded,
 			transport,
+			debug: true,
 		});
 		assert.equal(envelope.ok, false);
 		const serialized = JSON.stringify(envelope);
 		assert.doesNotMatch(serialized, /deepseek-secret|response-secret/);
-		if (envelope.ok) return;
+		if (envelope.ok || "command" in envelope) return;
 		assert.equal(envelope.error.code, "provider_exhausted");
-		assert.equal(envelope.attempts?.[0]?.error?.code, "provider_error");
+		assert.equal(envelope.attempts?.[0]?.code, "provider_error");
+		assert.doesNotMatch(
+			JSON.stringify(envelope.debug?.raw),
+			/deepseek-secret|response-secret/,
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("能力命令默认输出精简 envelope，debug 才包含完整诊断", async () => {
+	const fixture = loadedConfig({
+		providers: [{ id: "brave", type: "brave", apiKey: "brave-key" }],
+		search: { providers: ["brave"] },
+		extract: { providers: [] },
+	});
+	const transport = new MockTransport(() =>
+		response({
+			web: {
+				results: [
+					{
+						title: "Compact result",
+						url: "https://example.com/compact",
+						description: "compact snippet",
+					},
+				],
+			},
+		}),
+	);
+	try {
+		const compact = await executeSearch(searchRequest, {
+			loaded: fixture.loaded,
+			transport,
+		});
+		assert.deepEqual(Object.keys(compact), [
+			"schemaVersion",
+			"ok",
+			"provider",
+			"data",
+		]);
+		if (!hasProvider(compact)) return;
+		assert.equal(compact.provider, "brave");
+		assert.equal("raw" in compact, false);
+		assert.equal("attempts" in compact, false);
+
+		const debug = await executeSearch(searchRequest, {
+			loaded: fixture.loaded,
+			transport,
+			debug: true,
+		});
+		if (!hasProvider(debug)) return;
+		assert.deepEqual(Object.keys(debug), [
+			"schemaVersion",
+			"ok",
+			"provider",
+			"data",
+			"debug",
+		]);
+		if (!debug.debug || !("query" in debug.debug.request)) return;
+		assert.equal(debug.debug.request.query, "web access");
+		assert.equal(debug.debug?.provider?.id, "brave");
+		assert.equal(debug.debug?.attempts[0]?.status, "success");
 	} finally {
 		fixture.cleanup();
 	}

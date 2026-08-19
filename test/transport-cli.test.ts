@@ -238,11 +238,39 @@ test("CLI 输入错误也只在 stdout 输出一个 JSON envelope，并返回退
 	const lines = result.stdout.trim().split(/\r?\n/);
 	assert.equal(lines.length, 1);
 	const envelope = JSON.parse(lines[0] ?? "{}") as {
+		schemaVersion?: number;
 		ok?: boolean;
 		error?: { code?: string };
 	};
 	assert.equal(envelope.ok, false);
 	assert.equal(envelope.error?.code, "invalid_input");
+	assert.equal(envelope.schemaVersion, 2);
+	assert.equal("command" in envelope, false);
+});
+
+test("CLI capability 的 debug 选项不会污染默认精简错误输出", () => {
+	const result = spawnSync(
+		process.execPath,
+		[
+			"--import",
+			"tsx",
+			"src/cli.ts",
+			"extract",
+			"ftp://example.com",
+			"--debug",
+		],
+		{
+			cwd: resolve("."),
+			encoding: "utf8",
+			env: { ...process.env, WEB_ACCESS_CONFIG: "" },
+		},
+	);
+	assert.equal(result.status, 2);
+	assert.equal(result.stderr, "");
+	const envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+	assert.equal(envelope.schemaVersion, 2);
+	assert.equal(envelope.ok, false);
+	assert.equal("debug" in envelope, false);
 });
 
 test("CLI 自身的参数解析错误不会向 stderr 泄漏文本", () => {
@@ -268,7 +296,7 @@ test("CLI 注册 config edit 并向实现转发全局配置路径", async () => 
 		executeConfigEdit: async (options) => {
 			explicitPath = options?.explicitPath;
 			return {
-				schemaVersion: 1,
+				schemaVersion: 2,
 				ok: true,
 				command: "config.edit",
 				durationMs: 0,
@@ -292,7 +320,10 @@ test("CLI 注册 config edit 并向实现转发全局配置路径", async () => 
 	assert.equal(tasks.length, 1);
 	const envelope = await tasks[0]?.();
 	assert.equal(explicitPath, "./chosen-config.json");
-	assert.equal(envelope?.command, "config.edit");
+	assert.equal(
+		envelope && "command" in envelope ? envelope.command : undefined,
+		"config.edit",
+	);
 });
 
 test("CLI config edit 的路径错误保持单 JSON 与退出码契约", () => {

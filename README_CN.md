@@ -198,39 +198,13 @@ Attempt 会保留 Provider 的原始错误码、HTTP status 和 `retryable` 值�
 
 ## 输出契约
 
-成功示例：
+能力命令使用 output schema v2，默认 envelope 刻意保持精简：
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "ok": true,
-  "command": "search",
-  "durationMs": 183,
-  "request": {
-    "query": "Agent-neutral web CLI",
-    "provider": "auto",
-    "limit": 5,
-    "includeDomains": [],
-    "excludeDomains": []
-  },
-  "provider": { "id": "exa", "type": "exa" },
-  "attempts": [
-    {
-      "provider": { "id": "tavily", "type": "tavily" },
-      "status": "failed",
-      "durationMs": 0,
-      "error": {
-        "code": "provider_unavailable",
-        "message": "tavily 未完成 search 所需配置",
-        "retryable": true
-      }
-    },
-    {
-      "provider": { "id": "exa", "type": "exa" },
-      "status": "success",
-      "durationMs": 183
-    }
-  ],
+  "provider": "exa",
   "data": {
     "results": [
       {
@@ -240,12 +214,13 @@ Attempt 会保留 Provider 的原始错误码、HTTP status 和 `retryable` 值�
         "snippet": "Example snippet"
       }
     ]
-  },
-  "raw": {}
+  }
 }
 ```
 
-`raw` 只包含最终成功或最佳失败的 response body，不包含请求、响应 headers 或所有历史响应。API key 会从可序列化的 `raw` 和错误消息中脱敏。稳定 schema 位于 [schemas](schemas)。
+能力命令成功时默认只有 `schemaVersion`、`ok`、最终 Instance ID 和规范化 `data`。失败时包含精简 `error`；实际尝试过 Provider 时，`attempts` 只保留 Instance ID、错误码和可选 HTTP status。提取质量失败可包含不含 raw 的 `partial` 文档。搜索和提取输入错误也使用相同的精简失败结构。
+
+只有协议排障时才在 `search` 或 `extract` 上使用 `--debug`。该选项会增加嵌套 `debug`，其中包含 request、耗时、完整 attempts 以及最终成功或最佳失败的 raw 响应；raw 仍会递归脱敏，常规 Agent 调用不应使用此选项。`providers`、`doctor` 和 `config edit` 保留详细诊断 envelope；所有 envelope 使用 schema version 2。稳定 schema 位于 [schemas](schemas)。
 
 退出码：
 

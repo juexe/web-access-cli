@@ -3,6 +3,7 @@ import {
 	CAPABILITIES,
 	COMMANDS,
 	FRESHNESS_VALUES,
+	OUTPUT_SCHEMA_VERSION,
 	PROVIDER_TYPES,
 	SEARCH_FILTER_MODES,
 } from "./types.ts";
@@ -146,25 +147,103 @@ export const AttemptSchema = Type.Object({
 	error: Type.Optional(ErrorInfoSchema),
 });
 
-export const OutputEnvelopeSchema: TSchema = Type.Object({
-	schemaVersion: Type.Literal(1),
-	ok: Type.Boolean(),
-	command: Type.Union([CommandSchema, Type.Null()]),
+const CompactErrorInfoSchema = Type.Object({
+	code: Type.String(),
+	message: Type.String(),
+	retryable: Type.Boolean(),
+});
+
+const CapabilityAttemptSummarySchema = Type.Object({
+	provider: Type.String(),
+	code: Type.String(),
+	httpStatus: Type.Optional(Type.Integer()),
+});
+
+const CapabilityDebugSchema = Type.Object({
+	request: Type.Unknown(),
 	durationMs: Type.Integer({ minimum: 0 }),
-	request: Type.Optional(Type.Unknown()),
 	provider: Type.Optional(ProviderRefSchema),
-	attempts: Type.Optional(Type.Array(AttemptSchema)),
-	data: Type.Optional(Type.Unknown()),
+	attempts: Type.Array(AttemptSchema),
 	raw: Type.Optional(Type.Unknown()),
-	error: Type.Optional(ErrorInfoSchema),
 	partial: Type.Optional(
 		Type.Object({
 			provider: ProviderRefSchema,
-			data: Type.Object({ document: DocumentSchema }),
 			raw: Type.Unknown(),
 		}),
 	),
 });
+
+const SearchSuccessEnvelopeSchema = Type.Object({
+	schemaVersion: Type.Literal(OUTPUT_SCHEMA_VERSION),
+	ok: Type.Literal(true),
+	provider: Type.String(),
+	data: Type.Object({ results: Type.Array(SearchHitSchema) }),
+	debug: Type.Optional(CapabilityDebugSchema),
+});
+
+const ExtractSuccessEnvelopeSchema = Type.Object({
+	schemaVersion: Type.Literal(OUTPUT_SCHEMA_VERSION),
+	ok: Type.Literal(true),
+	provider: Type.String(),
+	data: Type.Object({ document: DocumentSchema }),
+	debug: Type.Optional(CapabilityDebugSchema),
+});
+
+const CapabilityFailureEnvelopeSchema = Type.Object({
+	schemaVersion: Type.Literal(OUTPUT_SCHEMA_VERSION),
+	ok: Type.Literal(false),
+	error: CompactErrorInfoSchema,
+	attempts: Type.Optional(Type.Array(CapabilityAttemptSummarySchema)),
+	partial: Type.Optional(
+		Type.Object({
+			provider: Type.String(),
+			data: Type.Object({ document: DocumentSchema }),
+		}),
+	),
+	debug: Type.Optional(CapabilityDebugSchema),
+});
+
+const DiagnosticSuccessEnvelopeSchema = Type.Object({
+	schemaVersion: Type.Literal(OUTPUT_SCHEMA_VERSION),
+	ok: Type.Literal(true),
+	command: Type.Union([Type.Literal("providers"), Type.Literal("doctor")]),
+	durationMs: Type.Integer({ minimum: 0 }),
+	data: Type.Unknown(),
+});
+
+const ConfigEditSuccessEnvelopeSchema = Type.Object({
+	schemaVersion: Type.Literal(OUTPUT_SCHEMA_VERSION),
+	ok: Type.Literal(true),
+	command: Type.Literal("config.edit"),
+	durationMs: Type.Integer({ minimum: 0 }),
+	data: Type.Object({
+		path: Type.String(),
+		created: Type.Boolean(),
+		opened: Type.Literal(true),
+	}),
+});
+
+const FailureEnvelopeSchema = Type.Object({
+	schemaVersion: Type.Literal(OUTPUT_SCHEMA_VERSION),
+	ok: Type.Literal(false),
+	command: Type.Union([
+		Type.Literal("providers"),
+		Type.Literal("doctor"),
+		Type.Literal("config.edit"),
+		Type.Null(),
+	]),
+	durationMs: Type.Integer({ minimum: 0 }),
+	error: ErrorInfoSchema,
+});
+
+export const OutputEnvelopeSchema: TSchema = Type.Union([
+	SearchSuccessEnvelopeSchema,
+	ExtractSuccessEnvelopeSchema,
+	CapabilityFailureEnvelopeSchema,
+	DiagnosticSuccessEnvelopeSchema,
+	ConfigEditSuccessEnvelopeSchema,
+	FailureEnvelopeSchema,
+]);
 
 export const SchemaDocuments = {
 	config: AppConfigSchema,

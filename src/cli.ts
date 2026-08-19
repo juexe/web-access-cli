@@ -108,6 +108,7 @@ export function createProgram(
 		.option("--include-domain <domain>", "仅包含域名，可重复", collect, [])
 		.option("--exclude-domain <domain>", "排除域名，可重复", collect, [])
 		.option("--timeout <milliseconds>", "总超时毫秒数", integer)
+		.option("--debug", "输出完整路由和脱敏原始响应", false)
 		.action(
 			(
 				query: string,
@@ -118,6 +119,7 @@ export function createProgram(
 					includeDomain: string[];
 					excludeDomain: string[];
 					timeout?: number;
+					debug: boolean;
 				},
 			) => {
 				run(async () => {
@@ -139,6 +141,7 @@ export function createProgram(
 					return executeSearch(request, {
 						loaded,
 						signal: processSignal.signal,
+						debug: options.debug,
 					});
 				});
 			},
@@ -150,21 +153,28 @@ export function createProgram(
 		.argument("<url>", "HTTP(S) URL")
 		.option("-p, --provider <id>", "provider instance id，或 auto", "auto")
 		.option("--timeout <milliseconds>", "总超时毫秒数", integer)
-		.action((url: string, options: { provider: string; timeout?: number }) => {
-			run(async () => {
-				const globals = program.opts<GlobalOptions>();
-				const loaded = loadConfig(globals.config);
-				const request: ExtractRequest = {
-					url: httpUrl(url),
-					provider: options.provider.toLowerCase(),
-					timeoutMs: options.timeout,
-				};
-				return executeExtract(request, {
-					loaded,
-					signal: processSignal.signal,
+		.option("--debug", "输出完整路由和脱敏原始响应", false)
+		.action(
+			(
+				url: string,
+				options: { provider: string; timeout?: number; debug: boolean },
+			) => {
+				run(async () => {
+					const globals = program.opts<GlobalOptions>();
+					const loaded = loadConfig(globals.config);
+					const request: ExtractRequest = {
+						url: httpUrl(url),
+						provider: options.provider.toLowerCase(),
+						timeoutMs: options.timeout,
+					};
+					return executeExtract(request, {
+						loaded,
+						signal: processSignal.signal,
+						debug: options.debug,
+					});
 				});
-			});
-		});
+			},
+		);
 
 	program
 		.command("providers")

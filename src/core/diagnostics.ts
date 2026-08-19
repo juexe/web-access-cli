@@ -6,6 +6,7 @@ import type {
 	FailureEnvelope,
 	ProviderInstance,
 } from "./types.ts";
+import { OUTPUT_SCHEMA_VERSION } from "./types.ts";
 
 function providerInfo(
 	instance: ProviderInstance,
@@ -39,7 +40,7 @@ export function executeProviders(
 	loaded: LoadedConfig,
 ): DiagnosticSuccessEnvelope {
 	return {
-		schemaVersion: 1,
+		schemaVersion: OUTPUT_SCHEMA_VERSION,
 		ok: true,
 		command: "providers",
 		durationMs: 0,
@@ -96,7 +97,7 @@ export function executeDoctor(
 	};
 	if (!ok)
 		return {
-			schemaVersion: 1,
+			schemaVersion: OUTPUT_SCHEMA_VERSION,
 			ok: false,
 			command: "doctor",
 			durationMs: 0,
@@ -108,7 +109,7 @@ export function executeDoctor(
 			},
 		};
 	return {
-		schemaVersion: 1,
+		schemaVersion: OUTPUT_SCHEMA_VERSION,
 		ok: true,
 		command: "doctor",
 		durationMs: 0,

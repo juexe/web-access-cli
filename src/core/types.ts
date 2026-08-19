@@ -30,6 +30,8 @@ export type Command = (typeof COMMANDS)[number];
 export const FRESHNESS_VALUES = ["day", "month", "year"] as const;
 export type SearchFreshness = (typeof FRESHNESS_VALUES)[number];
 
+export const OUTPUT_SCHEMA_VERSION = 2 as const;
+
 export interface ProviderInstanceConfig {
 	id: string;
 	type: ProviderType;
@@ -172,57 +174,82 @@ export interface ProviderAttempt {
 	error?: ErrorInfo;
 }
 
-export interface BaseEnvelope {
-	schemaVersion: 1;
-	ok: boolean;
-	command: Command | null;
+export interface CapabilityAttemptSummary {
+	provider: string;
+	code: ErrorCode;
+	httpStatus?: number;
+}
+
+export interface CompactErrorInfo {
+	code: ErrorCode;
+	message: string;
+	retryable: boolean;
+}
+
+export interface CapabilityDebug<
+	TRequest extends SearchRequest | ExtractRequest =
+		| SearchRequest
+		| ExtractRequest,
+> {
+	request: TRequest;
 	durationMs: number;
-	request?: unknown;
-	attempts?: ProviderAttempt[];
-	error?: ErrorInfo;
+	provider?: ProviderRef;
+	attempts: ProviderAttempt[];
+	raw?: unknown;
 	partial?: {
 		provider: ProviderRef;
-		data: ExtractData;
 		raw: unknown;
 	};
 }
 
+export interface BaseEnvelope {
+	schemaVersion: typeof OUTPUT_SCHEMA_VERSION;
+	ok: boolean;
+}
+
 export interface SearchSuccessEnvelope extends BaseEnvelope {
 	ok: true;
-	command: "search";
-	request: SearchRequest;
-	provider: ProviderRef;
-	attempts: ProviderAttempt[];
+	provider: string;
 	data: SearchData;
-	raw: unknown;
+	debug?: CapabilityDebug<SearchRequest>;
 }
 
 export interface ExtractSuccessEnvelope extends BaseEnvelope {
 	ok: true;
-	command: "extract";
-	request: ExtractRequest;
-	provider: ProviderRef;
-	attempts: ProviderAttempt[];
+	provider: string;
 	data: ExtractData;
-	raw: unknown;
+	debug?: CapabilityDebug<ExtractRequest>;
+}
+
+export interface CapabilityFailureEnvelope extends BaseEnvelope {
+	ok: false;
+	error: CompactErrorInfo;
+	attempts?: CapabilityAttemptSummary[];
+	partial?: {
+		provider: string;
+		data: ExtractData;
+	};
+	debug?: CapabilityDebug;
 }
 
 export interface FailureEnvelope extends BaseEnvelope {
 	ok: false;
+	command: Exclude<Command, Capability> | null;
+	durationMs: number;
 	error: ErrorInfo;
-	attempts?: ProviderAttempt[];
-	raw?: unknown;
 }
 
 export interface DiagnosticSuccessEnvelope extends BaseEnvelope {
 	ok: true;
 	command: "providers" | "doctor";
+	durationMs: number;
 	data: unknown;
 }
 
 export interface ConfigEditSuccessEnvelope extends BaseEnvelope {
 	ok: true;
 	command: "config.edit";
+	durationMs: number;
 	data: {
 		path: string;
 		created: boolean;
@@ -233,6 +260,7 @@ export interface ConfigEditSuccessEnvelope extends BaseEnvelope {
 export type OutputEnvelope =
 	| SearchSuccessEnvelope
 	| ExtractSuccessEnvelope
+	| CapabilityFailureEnvelope
 	| DiagnosticSuccessEnvelope
 	| ConfigEditSuccessEnvelope
 	| FailureEnvelope;

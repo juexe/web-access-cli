@@ -4,20 +4,24 @@ import { ref } from "../providers/common.ts";
 import { getAdapter } from "../providers/registry.ts";
 import { DefaultHttpTransport, type HttpTransport } from "../transport/http.ts";
 import { asWebAccessError, redactText, WebAccessError } from "./errors.ts";
-import type {
-	Capability,
-	Command,
-	ExtractData,
-	ExtractRequest,
-	ExtractSuccessEnvelope,
-	FailureEnvelope,
-	OutputEnvelope,
-	ProviderAttempt,
-	ProviderExecution,
-	ProviderInstance,
-	SearchData,
-	SearchRequest,
-	SearchSuccessEnvelope,
+import {
+	type Capability,
+	type CapabilityAttemptSummary,
+	type CapabilityFailureEnvelope,
+	type Command,
+	type CompactErrorInfo,
+	type ExtractData,
+	type ExtractRequest,
+	type ExtractSuccessEnvelope,
+	type FailureEnvelope,
+	OUTPUT_SCHEMA_VERSION,
+	type OutputEnvelope,
+	type ProviderAttempt,
+	type ProviderExecution,
+	type ProviderInstance,
+	type SearchData,
+	type SearchRequest,
+	type SearchSuccessEnvelope,
 } from "./types.ts";
 
 export interface ExecutionContext {
@@ -25,6 +29,7 @@ export interface ExecutionContext {
 	transport?: HttpTransport;
 	signal?: AbortSignal;
 	now?: () => number;
+	debug?: boolean;
 }
 
 interface RunResult<T> {
@@ -81,6 +86,31 @@ function safeRaw(raw: unknown, instances: ProviderInstance[]): unknown {
 		}
 	}
 	return redact(raw);
+}
+
+function compactError(error: WebAccessError): CompactErrorInfo {
+	return {
+		code: error.code,
+		message: error.message,
+		retryable: error.retryable,
+	};
+}
+
+function compactAttempts(
+	attempts: ProviderAttempt[],
+): CapabilityAttemptSummary[] {
+	const summaries: CapabilityAttemptSummary[] = [];
+	for (const attempt of attempts) {
+		if (attempt.status !== "failed" || !attempt.error) continue;
+		summaries.push({
+			provider: attempt.provider.id,
+			code: attempt.error.code,
+			...(attempt.error.httpStatus !== undefined
+				? { httpStatus: attempt.error.httpStatus }
+				: {}),
+		});
+	}
+	return summaries;
 }
 
 function resolveInstances(
@@ -297,7 +327,6 @@ async function runProviders<T>(options: {
 			`所有 ${options.capability} provider 均失败`,
 			{
 				retryable: false,
-				details: { lastError: lastError.toInfo() },
 				raw: lastRaw,
 			},
 		);
@@ -311,30 +340,45 @@ async function runProviders<T>(options: {
 }
 
 function failureEnvelope(
-	command: "search" | "extract",
 	request: SearchRequest | ExtractRequest,
 	started: number,
 	now: () => number,
 	result: RunFailure,
 	instances: ProviderInstance[],
-): FailureEnvelope {
+	debug: boolean,
+): CapabilityFailureEnvelope {
+	const durationMs = elapsed(started, now);
+	const attempts = compactAttempts(result.attempts);
 	return {
-		schemaVersion: 1,
+		schemaVersion: OUTPUT_SCHEMA_VERSION,
 		ok: false,
-		command,
-		durationMs: elapsed(started, now),
-		request,
-		attempts: result.attempts,
-		error: result.error.toInfo(),
-		...(result.raw !== undefined
-			? { raw: safeRaw(result.raw, instances) }
-			: {}),
+		error: compactError(result.error),
+		...(attempts.length > 0 ? { attempts } : {}),
 		...(result.partial
 			? {
 					partial: {
-						provider: ref(result.partial.provider),
+						provider: result.partial.provider.id,
 						data: result.partial.data,
-						raw: safeRaw(result.partial.raw, instances),
+					},
+				}
+			: {}),
+		...(debug && result.attempts.length > 0
+			? {
+					debug: {
+						request,
+						durationMs,
+						attempts: result.attempts,
+						...(result.raw !== undefined
+							? { raw: safeRaw(result.raw, instances) }
+							: {}),
+						...(result.partial
+							? {
+									partial: {
+										provider: ref(result.partial.provider),
+										raw: safeRaw(result.partial.raw, instances),
+									},
+								}
+							: {}),
 					},
 				}
 			: {}),
@@ -372,23 +416,30 @@ export async function executeSearch(
 	});
 	if ("error" in result)
 		return failureEnvelope(
-			"search",
 			request,
 			started,
 			now,
 			result,
 			context.loaded.instances,
+			context.debug ?? false,
 		);
+	const durationMs = elapsed(started, now);
 	const envelope: SearchSuccessEnvelope = {
-		schemaVersion: 1,
+		schemaVersion: OUTPUT_SCHEMA_VERSION,
 		ok: true,
-		command: "search",
-		durationMs: elapsed(started, now),
-		request,
-		provider: ref(result.provider),
-		attempts: result.attempts,
+		provider: result.provider.id,
 		data: result.execution.data,
-		raw: safeRaw(result.execution.raw, context.loaded.instances),
+		...(context.debug
+			? {
+					debug: {
+						request,
+						durationMs,
+						provider: ref(result.provider),
+						attempts: result.attempts,
+						raw: safeRaw(result.execution.raw, context.loaded.instances),
+					},
+				}
+			: {}),
 	};
 	return envelope;
 }
@@ -435,23 +486,30 @@ export async function executeExtract(
 	});
 	if ("error" in result)
 		return failureEnvelope(
-			"extract",
 			request,
 			started,
 			now,
 			result,
 			context.loaded.instances,
+			context.debug ?? false,
 		);
+	const durationMs = elapsed(started, now);
 	const envelope: ExtractSuccessEnvelope = {
-		schemaVersion: 1,
+		schemaVersion: OUTPUT_SCHEMA_VERSION,
 		ok: true,
-		command: "extract",
-		durationMs: elapsed(started, now),
-		request,
-		provider: ref(result.provider),
-		attempts: result.attempts,
+		provider: result.provider.id,
 		data: result.execution.data,
-		raw: safeRaw(result.execution.raw, context.loaded.instances),
+		...(context.debug
+			? {
+					debug: {
+						request,
+						durationMs,
+						provider: ref(result.provider),
+						attempts: result.attempts,
+						raw: safeRaw(result.execution.raw, context.loaded.instances),
+					},
+				}
+			: {}),
 	};
 	return envelope;
 }
@@ -459,10 +517,17 @@ export async function executeExtract(
 export function errorEnvelope(
 	error: unknown,
 	command: Command | null = null,
-): FailureEnvelope {
+): CapabilityFailureEnvelope | FailureEnvelope {
 	const normalized = asWebAccessError(error);
+	if (command === "search" || command === "extract") {
+		return {
+			schemaVersion: OUTPUT_SCHEMA_VERSION,
+			ok: false,
+			error: compactError(normalized),
+		};
+	}
 	return {
-		schemaVersion: 1,
+		schemaVersion: OUTPUT_SCHEMA_VERSION,
 		ok: false,
 		command,
 		durationMs: 0,

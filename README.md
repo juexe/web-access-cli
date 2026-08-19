@@ -198,39 +198,13 @@ Default limits are a 60-second total timeout and a 20-second per-attempt timeout
 
 ## Output contract
 
-Successful response example:
+Capability commands use output schema version 2. Their default envelope is intentionally small:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "ok": true,
-  "command": "search",
-  "durationMs": 183,
-  "request": {
-    "query": "Agent-neutral web CLI",
-    "provider": "auto",
-    "limit": 5,
-    "includeDomains": [],
-    "excludeDomains": []
-  },
-  "provider": { "id": "exa", "type": "exa" },
-  "attempts": [
-    {
-      "provider": { "id": "tavily", "type": "tavily" },
-      "status": "failed",
-      "durationMs": 0,
-      "error": {
-        "code": "provider_unavailable",
-        "message": "tavily 未完成 search 所需配置",
-        "retryable": true
-      }
-    },
-    {
-      "provider": { "id": "exa", "type": "exa" },
-      "status": "success",
-      "durationMs": 183
-    }
-  ],
+  "provider": "exa",
   "data": {
     "results": [
       {
@@ -240,14 +214,13 @@ Successful response example:
         "snippet": "Example snippet"
       }
     ]
-  },
-  "raw": {}
+  }
 }
 ```
 
-The Chinese `message` value above matches the CLI's current error output contract.
+Default capability output contains only `schemaVersion`, `ok`, the final Instance ID and normalized `data`. Failures contain a compact `error` and, when providers were attempted, `attempts` entries with only Instance ID, error code and optional HTTP status. Extract quality failures may include a `partial` document without raw provider data. Search and extract input errors use the same compact failure shape.
 
-`raw` contains only the response body from the final success or best failure. It never contains requests, response headers, or every historical response. API keys are redacted from serializable `raw` data and error messages. Stable schemas are available in [schemas](schemas).
+Use `--debug` on `search` or `extract` only for protocol troubleshooting. It adds a nested `debug` object containing the request, durations, complete attempts and the final or best-failure raw response. Raw data remains recursively redacted and is not part of normal Agent calls. `providers`, `doctor`, and `config edit` retain their detailed diagnostic envelopes; all envelopes use schema version 2. Stable schemas are available in [schemas](schemas).
 
 Exit codes:
 
