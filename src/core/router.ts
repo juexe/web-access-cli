@@ -158,6 +158,13 @@ function normalizeAbort(
 	});
 }
 
+function isFallbackEligible(error: WebAccessError): boolean {
+	const status = error.httpStatus;
+	return (
+		error.retryable || (status !== undefined && (status < 200 || status >= 300))
+	);
+}
+
 async function runProviders<T>(options: {
 	capability: Capability;
 	selected: string;
@@ -247,7 +254,7 @@ async function runProviders<T>(options: {
 					durationMs: elapsed(attemptStarted, now),
 					error: qualityError.toInfo(),
 				});
-				if (!resolved.automatic || !qualityError.retryable) break;
+				if (!resolved.automatic || !isFallbackEligible(qualityError)) break;
 				continue;
 			}
 			attempts.push({
@@ -270,7 +277,7 @@ async function runProviders<T>(options: {
 				durationMs: elapsed(attemptStarted, now),
 				error: error.toInfo(),
 			});
-			if (!resolved.automatic || !error.retryable) break;
+			if (!resolved.automatic || !isFallbackEligible(error)) break;
 		}
 	}
 
@@ -283,7 +290,7 @@ async function runProviders<T>(options: {
 		resolved.automatic &&
 		attempts.length > 0 &&
 		attempts.every((attempt) => attempt.status === "failed") &&
-		lastError.retryable
+		isFallbackEligible(lastError)
 	) {
 		lastError = new WebAccessError(
 			"provider_exhausted",

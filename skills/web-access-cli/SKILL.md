@@ -28,6 +28,6 @@ web-access search "query" --provider <id>
 web-access extract "https://example.com" --provider <id>
 ```
 
-`auto` 通常已经尝试可回退的 Instance，不要盲目重复请求。需要搜索过滤、数量或超时等选项时，运行 `web-access search --help` 或 `web-access extract --help`。
+`auto` 通常已经尝试可回退的 Instance，并会在 Provider 返回最终非 2xx HTTP 响应时继续 Route，不要盲目重复请求。需要搜索过滤、数量或超时等选项时，运行 `web-access search --help` 或 `web-access extract --help`。
 
 若 `web-access` 命令不存在，直接说明工具不可用；不要自动安装、构建或改用源码入口。

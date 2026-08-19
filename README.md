@@ -159,7 +159,7 @@ Default routes:
 
 The default routes include every built-in instance that supports the corresponding capability. Custom instance IDs are merged into the instance list but must still be added to routes explicitly. An omitted route uses the defaults above, while an explicit empty array disables that capability. In `auto` mode, incompletely configured instances are skipped; AnySearch can be called anonymously with its default base URL, while XCrawl and DeepSeek are skipped until their API keys are configured. AnySearch and XCrawl accept `searchFilterMode`: `strict` (default; freshness skips the provider) or `best_effort` (rewrites freshness into a query fragment). Domain constraints are rewritten into the query and strictly re-applied locally. XCrawl Extract always uses synchronous Scrape with Markdown output; Map, Crawl, and asynchronous jobs are outside the current CLI capabilities.
 
-DeepSeek Search performs a full Anthropic-compatible Messages model turn with the native `web_search_20250305` server tool, so it can have higher latency and cost than a dedicated search endpoint. It is last in the default route and is reached only after earlier providers are unavailable or fail recoverably. The adapter accepts URLs only from structured `web_search_tool_result` blocks, joins citation excerpts by URL, and never extracts URLs from model prose. Domain constraints are rewritten into the query and strictly re-applied locally; `freshness` is unsupported and skips DeepSeek with a recoverable error. Redirects are rejected without contacting the `Location` target. Provider-private `encrypted_content` payloads are omitted from `raw` because they are opaque, cannot be displayed or decoded by the CLI, and add no diagnostic value.
+DeepSeek Search performs a full Anthropic-compatible Messages model turn with the native `web_search_20250305` server tool, so it can have higher latency and cost than a dedicated search endpoint. It is last in the default route and is reached only after earlier providers are unavailable, return a final non-2xx HTTP response, or otherwise fail recoverably. The adapter accepts URLs only from structured `web_search_tool_result` blocks, joins citation excerpts by URL, and never extracts URLs from model prose. Domain constraints are rewritten into the query and strictly re-applied locally; `freshness` is unsupported and skips DeepSeek with a recoverable error. Redirects are rejected without contacting the `Location` target. Provider-private `encrypted_content` payloads are omitted from `raw` because they are opaque, cannot be displayed or decoded by the CLI, and add no diagnostic value.
 
 ### Credentials and URLs
 
@@ -185,9 +185,12 @@ Custom instances use `apiKeyEnv` and `baseUrlEnv` to name their environment vari
 `--provider auto` follows the configured route order:
 
 1. An instance with incomplete configuration is recorded as a failed attempt and skipped.
-2. Recoverable errors, including network errors, timeouts, rate limits, 5xx responses, oversized responses, and missing usable content, cause the router to try the next instance.
-3. Non-recoverable errors, including authentication errors, invalid input, and unsupported content, stop execution immediately.
-4. If every instance fails, the command returns `provider_exhausted`. The best short content produced during extraction is preserved in `partial`.
+2. A final provider HTTP response outside 2xx, including authentication, request, rate-limit, and server errors, causes the router to try the next instance.
+3. Other recoverable errors, including network errors, timeouts, oversized responses, and missing usable content, also cause the router to continue.
+4. Non-recoverable failures without a final non-2xx response, including invalid input and unsupported content detected in a successful response, stop execution immediately.
+5. If every instance fails, the command returns `provider_exhausted`. The best short content produced during extraction is preserved in `partial`.
+
+An attempt keeps the provider's original error code, HTTP status, and `retryable` value. `retryable` describes whether the original operation can be retried against the same provider; it is not the sole condition for switching to the next provider in an automatic route.
 
 Selecting an instance explicitly executes it strictly without fallback. If the instance is not in the route, the command returns `provider_disabled`.
 

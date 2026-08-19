@@ -263,6 +263,206 @@ test("auto 仅在前序失败后调用 DeepSeek", async () => {
 	}
 });
 
+test("auto 对最终非 2xx HTTP 响应切换到下一 provider", async (t) => {
+	const cases = [
+		{ status: 302, code: "provider_error", retryable: false },
+		{ status: 401, code: "auth_error", retryable: false },
+		{ status: 404, code: "provider_error", retryable: false },
+		{ status: 500, code: "provider_error", retryable: true },
+	] as const;
+	for (const item of cases) {
+		await t.test(String(item.status), async () => {
+			const fixture = loadedConfig({
+				providers: [
+					{ id: "tavily", type: "tavily", apiKey: "tavily-key" },
+					{ id: "brave", type: "brave", apiKey: "brave-key" },
+				],
+				search: { providers: ["tavily", "brave"] },
+				extract: { providers: [] },
+			});
+			try {
+				const transport = new MockTransport((url) => {
+					if (url.includes("tavily"))
+						return response(
+							{ error: `tavily failed with ${item.status}` },
+							{ status: item.status },
+						);
+					return response({
+						web: {
+							results: [
+								{
+									title: "Brave fallback",
+									url: "https://example.com/fallback",
+									description: "fallback succeeded",
+								},
+							],
+						},
+					});
+				});
+				const envelope = await executeSearch(searchRequest, {
+					loaded: fixture.loaded,
+					transport,
+				});
+				assert.equal(envelope.ok, true);
+				if (!envelope.ok || envelope.command !== "search") return;
+				assert.equal(envelope.provider.id, "brave");
+				assert.equal(transport.calls.length, 2);
+				assert.deepEqual(
+					envelope.attempts.map((attempt) => [
+						attempt.provider.id,
+						attempt.status,
+					]),
+					[
+						["tavily", "failed"],
+						["brave", "success"],
+					],
+				);
+				assert.equal(envelope.attempts[0]?.error?.code, item.code);
+				assert.equal(envelope.attempts[0]?.error?.httpStatus, item.status);
+				assert.equal(envelope.attempts[0]?.error?.retryable, item.retryable);
+			} finally {
+				fixture.cleanup();
+			}
+		});
+	}
+});
+
+test("extract auto 在前序 provider 返回非 2xx 后继续 route", async () => {
+	const fixture = loadedConfig({
+		search: { providers: [] },
+		extract: {
+			providers: ["jina", "http"],
+			minContentCharacters: 5,
+		},
+	});
+	try {
+		const transport = new MockTransport((_url) => {
+			if (transport.calls.length === 1)
+				return response({ error: "jina forbidden" }, { status: 403 });
+			return response("后备 HTTP provider 返回的有效正文", {
+				contentType: "text/plain; charset=utf-8",
+			});
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{ loaded: fixture.loaded, transport },
+		);
+		assert.equal(envelope.ok, true);
+		if (!envelope.ok || envelope.command !== "extract") return;
+		assert.equal(envelope.provider.id, "http");
+		assert.equal(envelope.attempts[0]?.error?.code, "auth_error");
+		assert.equal(envelope.attempts[0]?.error?.retryable, false);
+		assert.equal(transport.calls.length, 2);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("auto 因非 2xx 耗尽 route 时返回 provider_exhausted", async () => {
+	const fixture = loadedConfig({
+		providers: [
+			{ id: "tavily", type: "tavily", apiKey: "tavily-key" },
+			{ id: "brave", type: "brave", apiKey: "brave-key" },
+		],
+		search: { providers: ["tavily", "brave"] },
+		extract: { providers: [] },
+	});
+	try {
+		const transport = new MockTransport(() =>
+			response({ error: "credential rejected" }, { status: 401 }),
+		);
+		const envelope = await executeSearch(searchRequest, {
+			loaded: fixture.loaded,
+			transport,
+		});
+		assert.equal(envelope.ok, false);
+		if (envelope.ok) return;
+		assert.equal(envelope.error.code, "provider_exhausted");
+		assert.equal(envelope.error.retryable, false);
+		assert.equal(envelope.attempts?.length, 2);
+		assert.deepEqual(
+			envelope.attempts?.map((attempt) => [
+				attempt.error?.code,
+				attempt.error?.httpStatus,
+				attempt.error?.retryable,
+			]),
+			[
+				["auth_error", 401, false],
+				["auth_error", 401, false],
+			],
+		);
+		assert.equal(
+			(
+				envelope.error.details as {
+					lastError?: {
+						code?: string;
+						httpStatus?: number;
+						retryable?: boolean;
+					};
+				}
+			)?.lastError?.code,
+			"auth_error",
+		);
+		assert.equal(transport.calls.length, 2);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("显式 provider 的非 2xx 响应不触发 fallback", async () => {
+	const fixture = loadedConfig({
+		providers: [
+			{ id: "tavily", type: "tavily", apiKey: "tavily-key" },
+			{ id: "brave", type: "brave", apiKey: "brave-key" },
+		],
+		search: { providers: ["tavily", "brave"] },
+		extract: { providers: [] },
+	});
+	try {
+		const transport = new MockTransport(() =>
+			response({ error: "credential rejected" }, { status: 401 }),
+		);
+		const envelope = await executeSearch(
+			{ ...searchRequest, provider: "tavily" },
+			{ loaded: fixture.loaded, transport },
+		);
+		assert.equal(envelope.ok, false);
+		if (envelope.ok) return;
+		assert.equal(envelope.error.code, "auth_error");
+		assert.equal(envelope.error.retryable, false);
+		assert.equal(envelope.attempts?.length, 1);
+		assert.equal(transport.calls.length, 1);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("auto 不扩大 HTTP 2xx 内嵌业务错误的回退范围", async () => {
+	const fixture = loadedConfig({
+		providers: [{ id: "brave", type: "brave", apiKey: "brave-key" }],
+		search: { providers: ["anysearch", "brave"] },
+		extract: { providers: [] },
+	});
+	try {
+		const transport = new MockTransport(() =>
+			response({ code: 401, message: "business auth failure" }),
+		);
+		const envelope = await executeSearch(searchRequest, {
+			loaded: fixture.loaded,
+			transport,
+		});
+		assert.equal(envelope.ok, false);
+		if (envelope.ok) return;
+		assert.equal(envelope.error.code, "auth_error");
+		assert.equal(envelope.error.retryable, false);
+		assert.equal(envelope.attempts?.length, 1);
+		assert.equal(envelope.attempts?.[0]?.provider.id, "anysearch");
+		assert.equal(transport.calls.length, 1);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
 test("auto 在前序成功时不调用 DeepSeek", async () => {
 	const fixture = loadedConfig({
 		providers: [
