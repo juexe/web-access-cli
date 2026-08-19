@@ -8,6 +8,7 @@ export const PROVIDER_TYPES = [
 	"http",
 	"anysearch",
 	"xcrawl",
+	"deepseek",
 ] as const;
 export type ProviderType = (typeof PROVIDER_TYPES)[number];
 

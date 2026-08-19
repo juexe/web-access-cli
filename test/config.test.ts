@@ -138,6 +138,65 @@ test("XCrawl 缺少凭据时 doctor 报告未完成配置", () => {
 	}
 });
 
+test("DeepSeek 使用标准 key、通用覆盖和 Search-only capability", () => {
+	const fixture = configFile({
+		providers: [
+			{
+				id: "deepseek",
+				type: "deepseek",
+				apiKey: "config-key",
+				baseUrl: "https://deepseek.internal/anthropic/v1/",
+				headers: { "X-Team": "search" },
+			},
+		],
+		search: { providers: ["deepseek"] },
+		extract: { providers: ["http"] },
+	});
+	try {
+		const loaded = loadConfig(fixture.path, {
+			DEEPSEEK_API_KEY: "env-key",
+			DEEPSEEK_BASE_URL: "https://ignored.example.com",
+		});
+		const deepseek = loaded.instances.find((item) => item.id === "deepseek");
+		assert.equal(deepseek?.apiKey, "env-key");
+		assert.equal(deepseek?.credentialSource, "standard_env");
+		assert.equal(deepseek?.baseUrl, "https://deepseek.internal/anthropic/v1");
+		assert.equal(deepseek?.baseUrlSource, "config");
+		assert.equal(deepseek?.headers["X-Team"], "search");
+		assert.equal(capabilitySupports("deepseek", "search"), true);
+		assert.equal(capabilitySupports("deepseek", "extract"), false);
+		const provider = (
+			executeProviders(loaded).data as {
+				providers: Array<Record<string, unknown>>;
+			}
+		).providers.find((item) => item.id === "deepseek");
+		assert.deepEqual(provider?.capabilities, ["search"]);
+		assert.deepEqual(provider?.routes, { search: true, extract: false });
+		assert.equal(executeDoctor(loaded).ok, true);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("DeepSeek 默认 endpoint 固定且缺少 key 时 doctor 失败", () => {
+	const fixture = configFile({
+		search: { providers: ["deepseek"] },
+		extract: { providers: ["http"] },
+	});
+	try {
+		const loaded = loadConfig(fixture.path, {
+			DEEPSEEK_BASE_URL: "https://ignored.example.com",
+		});
+		const deepseek = loaded.instances.find((item) => item.id === "deepseek");
+		assert.equal(deepseek?.baseUrl, "https://api.deepseek.com/anthropic/v1");
+		assert.equal(deepseek?.baseUrlSource, "default");
+		assert.equal(deepseek?.apiKey, null);
+		assert.equal(executeDoctor(loaded).ok, false);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
 test("不支持过滤策略的 instance 拒绝 searchFilterMode", () => {
 	const fixture = configFile({
 		providers: [{ id: "http", type: "http", searchFilterMode: "strict" }],
@@ -146,6 +205,22 @@ test("不支持过滤策略的 instance 拒绝 searchFilterMode", () => {
 		assert.throws(() => loadConfig(fixture.path, {}), isConfigError);
 	} finally {
 		fixture.cleanup();
+	}
+});
+
+test("DeepSeek 不能进入 Extract route 或配置 searchFilterMode", () => {
+	const extract = configFile({ extract: { providers: ["deepseek"] } });
+	const filterMode = configFile({
+		providers: [
+			{ id: "deepseek", type: "deepseek", searchFilterMode: "strict" },
+		],
+	});
+	try {
+		assert.throws(() => loadConfig(extract.path, {}), isConfigError);
+		assert.throws(() => loadConfig(filterMode.path, {}), isConfigError);
+	} finally {
+		extract.cleanup();
+		filterMode.cleanup();
 	}
 });
 
@@ -163,6 +238,7 @@ test("providers 省略或为空时合并全部内置 instance，自定义 id 只
 		"http",
 		"anysearch",
 		"xcrawl",
+		"deepseek",
 	];
 	try {
 		assert.deepEqual(
@@ -202,6 +278,7 @@ test("缺省 route 覆盖全部支持能力的内置 provider，显式空 route 
 			"searxng",
 			"anysearch",
 			"xcrawl",
+			"deepseek",
 		]);
 		assert.deepEqual(loaded.app.extract.providers, [
 			"firecrawl",
@@ -269,6 +346,7 @@ test("只读取显式或用户级配置路径", () => {
 			"searxng",
 			"anysearch",
 			"xcrawl",
+			"deepseek",
 		]);
 		assert.deepEqual(loaded.app.extract.providers, [
 			"firecrawl",

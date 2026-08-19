@@ -97,6 +97,10 @@
             {
               "type": "string",
               "const": "xcrawl"
+            },
+            {
+              "type": "string",
+              "const": "deepseek"
             }
           ]
         }
@@ -159,6 +163,10 @@
                   {
                     "type": "string",
                     "const": "xcrawl"
+                  },
+                  {
+                    "type": "string",
+                    "const": "deepseek"
                   }
                 ]
               }
@@ -244,6 +252,10 @@
                       {
                         "type": "string",
                         "const": "xcrawl"
+                      },
+                      {
+                        "type": "string",
+                        "const": "deepseek"
                       }
                     ]
                   }
@@ -324,6 +336,10 @@
                 {
                   "type": "string",
                   "const": "xcrawl"
+                },
+                {
+                  "type": "string",
+                  "const": "deepseek"
                 }
               ]
             }
@@ -390,6 +406,10 @@
                 {
                   "type": "string",
                   "const": "xcrawl"
+                },
+                {
+                  "type": "string",
+                  "const": "deepseek"
                 }
               ]
             }

@@ -5,7 +5,7 @@
 [![CI](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-一个 Agent-neutral 的网页能力 CLI。它把“搜索”和“网页正文提取”定义为稳定能力，把 Tavily、Exa、Brave、SearXNG、AnySearch、XCrawl、Firecrawl、Jina 等差异收敛到内部统一 schema。
+一个 Agent-neutral 的网页能力 CLI。它把“搜索”和“网页正文提取”定义为稳定能力，把 Tavily、Exa、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、Firecrawl、Jina 等差异收敛到内部统一 schema。
 
 CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCode 或其他 Agent。Skill、MCP 和 Agent 插件只能作为 CLI 上层 adapter 接入，不能污染核心能力和 Provider 实现。
 
@@ -13,7 +13,7 @@ CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCo
 
 | 能力 | Provider Type | 统一输出 |
 | --- | --- | --- |
-| `search` | Tavily、Exa、Brave、SearXNG、AnySearch、XCrawl | `rank`、`title`、`url`、`snippet` |
+| `search` | Tavily、Exa、Brave、SearXNG、AnySearch、XCrawl、DeepSeek | `rank`、`title`、`url`、`snippet` |
 | `extract` | Firecrawl v2、Jina Reader、Exa Contents、AnySearch、XCrawl、HTTP | Markdown `Document` |
 
 Provider Type 描述实现类型；Provider Instance 是一份可配置实例。一个 Type 可以有多个 Instance，例如 `exa_team` 和 `exa_personal`。Route 是有序 Instance ID 数组，既决定启用状态，也决定 `auto` 的尝试顺序。
@@ -150,14 +150,16 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 }
 ```
 
-内置 Instance 为 `tavily`、`exa`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`、`xcrawl`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。只有出现在对应 `providers` Route 中的实例才启用。AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用；XCrawl 默认 base URL 为 `https://run.xcrawl.com`，必须配置 API key。
+内置 Instance 为 `tavily`、`exa`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`、`xcrawl`、`deepseek`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。只有出现在对应 `providers` Route 中的实例才启用。AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用；XCrawl 默认 base URL 为 `https://run.xcrawl.com`，必须配置 API key；DeepSeek 默认 base URL 为 `https://api.deepseek.com/anthropic/v1`，必须配置 API key。
 
 默认 Route：
 
-- Search：`tavily -> exa -> brave -> searxng -> anysearch -> xcrawl`
+- Search：`tavily -> exa -> brave -> searxng -> anysearch -> xcrawl -> deepseek`
 - Extract：`firecrawl -> jina -> exa -> anysearch -> xcrawl -> http`
 
-默认 Route 包含支持对应 Capability 的全部内置 Instance。自定义 ID 会合并到 Instance 列表，但仍需显式加入 Route；省略 Route 时使用上述默认值，显式空数组则禁用对应能力。`auto` 会跳过未完成配置的 Instance；AnySearch 使用默认 base URL 时可匿名调用，XCrawl 则在配置 API key 前被跳过。两类 Instance 均可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
+默认 Route 包含支持对应 Capability 的全部内置 Instance。自定义 ID 会合并到 Instance 列表，但仍需显式加入 Route；省略 Route 时使用上述默认值，显式空数组则禁用对应能力。`auto` 会跳过未完成配置的 Instance；AnySearch 使用默认 base URL 时可匿名调用，XCrawl 和 DeepSeek 则在配置 API key 前被跳过。AnySearch 与 XCrawl 可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
+
+DeepSeek Search 通过 Anthropic-compatible Messages API 调用原生 `web_search_20250305` server tool，一次搜索是完整模型轮次，因此延迟和成本可能高于专用搜索 endpoint。它位于默认 Route 末尾，仅在前序 Provider 未配置或可恢复失败后触发。Adapter 只接受 `web_search_tool_result` 中的结构化 URL，按 URL 合并 citation 摘要，绝不从模型 prose 中猜测 URL。域名条件会改写查询并在本地再次严格过滤；DeepSeek 不支持 `freshness`，遇到该参数时以可恢复错误跳过；重定向会被严格拒绝，且不会访问 `Location` 目标。
 
 ### 凭据和 URL
 
@@ -174,6 +176,7 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 | HTTP | 无 | 无 |
 | AnySearch | `ANYSEARCH_API_KEY`，可选 | `ANYSEARCH_BASE_URL`，默认 `https://api.anysearch.com` |
 | XCrawl | `XCRAWL_API_KEY` | `XCRAWL_BASE_URL`，默认 `https://run.xcrawl.com` |
+| DeepSeek | `DEEPSEEK_API_KEY` | 无标准环境变量；默认 `https://api.deepseek.com/anthropic/v1` |
 
 自定义 Instance 使用 `apiKeyEnv` 和 `baseUrlEnv` 指定自己的环境变量。所有远端 Provider 都可以设置 `baseUrl` 和附加 `headers`。公共 `api.firecrawl.dev` 需要 key；自托管 Firecrawl v2 可以不设置 key。
 

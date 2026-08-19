@@ -23,6 +23,7 @@ export const DEFAULT_SEARCH_PROVIDERS = [
 	"searxng",
 	"anysearch",
 	"xcrawl",
+	"deepseek",
 ] as const;
 export const DEFAULT_EXTRACT_PROVIDERS = [
 	"firecrawl",
@@ -57,6 +58,7 @@ const SEARCH_TYPES = new Set<ProviderType>([
 	"searxng",
 	"anysearch",
 	"xcrawl",
+	"deepseek",
 ]);
 const EXTRACT_TYPES = new Set<ProviderType>([
 	"firecrawl",
@@ -77,6 +79,7 @@ const DEFAULT_INSTANCE_CONFIGS: ProviderInstanceConfig[] = [
 	{ id: "http", type: "http" },
 	{ id: "anysearch", type: "anysearch", searchFilterMode: "strict" },
 	{ id: "xcrawl", type: "xcrawl", searchFilterMode: "strict" },
+	{ id: "deepseek", type: "deepseek" },
 ];
 
 const STANDARD_KEY_ENV: Partial<Record<ProviderType, string>> = {
@@ -87,6 +90,7 @@ const STANDARD_KEY_ENV: Partial<Record<ProviderType, string>> = {
 	jina: "JINA_API_KEY",
 	anysearch: "ANYSEARCH_API_KEY",
 	xcrawl: "XCRAWL_API_KEY",
+	deepseek: "DEEPSEEK_API_KEY",
 };
 
 const STANDARD_BASE_ENV: Partial<Record<ProviderType, string>> = {
@@ -527,6 +531,7 @@ const DEFAULT_BASE_URLS: Partial<Record<ProviderType, string>> = {
 	jina: "https://r.jina.ai",
 	anysearch: "https://api.anysearch.com",
 	xcrawl: "https://run.xcrawl.com",
+	deepseek: "https://api.deepseek.com/anthropic/v1",
 };
 
 export interface LoadedConfig {

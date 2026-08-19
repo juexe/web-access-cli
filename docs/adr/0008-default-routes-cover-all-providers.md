@@ -9,7 +9,7 @@
 
 ## 决策
 
-省略 Capability 的 Route 时，默认 Route 包含支持该能力的全部内置 Instance；新增 Provider Type 时必须明确安排默认顺序。Search 顺序为 `tavily -> exa -> brave -> searxng -> anysearch -> xcrawl`，Extract 顺序为 `firecrawl -> jina -> exa -> anysearch -> xcrawl -> http`，通用 HTTP 保持最终后备。
+省略 Capability 的 Route 时，默认 Route 包含支持该能力的全部内置 Instance；新增 Provider Type 时必须明确安排默认顺序。Search 顺序为 `tavily -> exa -> brave -> searxng -> anysearch -> xcrawl -> deepseek`，Extract 顺序为 `firecrawl -> jina -> exa -> anysearch -> xcrawl -> http`，通用 HTTP 保持最终后备。DeepSeek 是完整模型轮次，放在 Search Route 末尾以避免不必要的延迟与费用。
 
 显式 Route 保持原样，显式空数组继续表示禁用全部，自定义 Instance ID 不会隐式加入默认 Route。`auto` 仍跳过未完成配置的 Instance。本决策取代 ADR 0006 与 ADR 0007 中 AnySearch、XCrawl 不加入默认 Route 的条款。
 

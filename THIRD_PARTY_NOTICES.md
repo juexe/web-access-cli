@@ -33,6 +33,19 @@
 
 Pi-specific 的工具注册、UI、Agent 生命周期与协议代码没有进入本项目。
 
+## DeepSeek Harness web-search-deepseek
+
+DeepSeek Search Provider 的 Anthropic-compatible Messages wire shape、结构化结果解析与 citation 映射参考并改写自：
+
+- 项目：`deepseek-harness`
+- 仓库：`https://github.com/deepseek-ai/deepseek-harness.git`
+- 上游路径：`packages/web/web-search-deepseek`
+- 参考提交：`99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`
+- Copyright 2026 DeepSeek
+- 许可证：MIT（适用的许可文本与上文所列 MIT 文本相同）
+
+动态 Settings、Credential Service、Session event、LLM seam 和 Agent 集成代码没有进入本项目。
+
 ## npm 依赖
 
 发行包直接使用以下开源组件：

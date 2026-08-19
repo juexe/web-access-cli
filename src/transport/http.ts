@@ -178,6 +178,7 @@ export class DefaultHttpTransport implements HttpTransport {
 			try {
 				response = await undiciFetch(current, {
 					method,
+					redirect: "manual",
 					...(body !== undefined ? { body } : {}),
 					headers,
 					signal: options.signal,

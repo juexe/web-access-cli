@@ -74,6 +74,10 @@
                   {
                     "type": "string",
                     "const": "http"
+                  },
+                  {
+                    "type": "string",
+                    "const": "deepseek"
                   }
                 ]
               }

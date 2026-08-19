@@ -7,8 +7,10 @@ import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { createProgram } from "../src/cli.ts";
 import type { OutputEnvelope } from "../src/core/types.ts";
+import { getAdapter } from "../src/providers/registry.ts";
 import { DefaultHttpTransport } from "../src/transport/http.ts";
 import { VERSION } from "../src/version.ts";
+import { instance } from "./helpers.ts";
 
 async function serverUrl(t: TestContext): Promise<string> {
 	const server = createServer((request, response) => {
@@ -60,6 +62,160 @@ test("HTTP transport 跟随重定向并执行响应大小硬上限", async (t) =
 				error !== null &&
 				"code" in error &&
 				error.code === "response_too_large",
+		);
+	} finally {
+		if (previousNoProxy === undefined) delete process.env.NO_PROXY;
+		else process.env.NO_PROXY = previousNoProxy;
+	}
+});
+
+test("DeepSeek adapter 严格拒绝重定向且不接触 Location 目标", async (t) => {
+	let targetRequests = 0;
+	const target = createServer((_request, response) => {
+		targetRequests++;
+		response.writeHead(200, { "Content-Type": "application/json" });
+		response.end(
+			JSON.stringify({
+				content: [{ type: "web_search_tool_result", content: [] }],
+			}),
+		);
+	});
+	await new Promise<void>((resolveListen) =>
+		target.listen(0, "127.0.0.1", resolveListen),
+	);
+	t.after(
+		() =>
+			new Promise<void>((resolveClose) => target.close(() => resolveClose())),
+	);
+	const targetAddress = target.address();
+	if (!targetAddress || typeof targetAddress === "string")
+		throw new Error("目标测试服务器未监听 TCP 端口");
+
+	const redirect = createServer((_request, response) => {
+		response.writeHead(302, {
+			Location: `http://127.0.0.1:${targetAddress.port}/result`,
+		});
+		response.end();
+	});
+	await new Promise<void>((resolveListen) =>
+		redirect.listen(0, "127.0.0.1", resolveListen),
+	);
+	t.after(
+		() =>
+			new Promise<void>((resolveClose) => redirect.close(() => resolveClose())),
+	);
+	const redirectAddress = redirect.address();
+	if (!redirectAddress || typeof redirectAddress === "string")
+		throw new Error("重定向测试服务器未监听 TCP 端口");
+
+	const previousNoProxy = process.env.NO_PROXY;
+	process.env.NO_PROXY = "127.0.0.1,localhost";
+	try {
+		const adapter = getAdapter("deepseek", "search");
+		assert.ok(adapter?.search);
+		await assert.rejects(
+			adapter.search({
+				query: "redirect policy",
+				limit: 5,
+				includeDomains: [],
+				excludeDomains: [],
+				signal: new AbortController().signal,
+				maxResponseBytes: 1024,
+				instance: instance("deepseek", {
+					baseUrl: `http://127.0.0.1:${redirectAddress.port}`,
+				}),
+				transport: new DefaultHttpTransport(),
+			}),
+			(error: unknown) =>
+				typeof error === "object" &&
+				error !== null &&
+				"code" in error &&
+				error.code === "provider_error",
+		);
+		assert.equal(targetRequests, 0);
+	} finally {
+		if (previousNoProxy === undefined) delete process.env.NO_PROXY;
+		else process.env.NO_PROXY = previousNoProxy;
+	}
+});
+
+test("DeepSeek 通过统一 transport 映射取消与网络失败", async (t) => {
+	let markRequestStarted: (() => void) | undefined;
+	const requestStarted = new Promise<void>((resolveStarted) => {
+		markRequestStarted = resolveStarted;
+	});
+	const hanging = createServer(() => {
+		markRequestStarted?.();
+	});
+	await new Promise<void>((resolveListen) =>
+		hanging.listen(0, "127.0.0.1", resolveListen),
+	);
+	t.after(
+		() =>
+			new Promise<void>((resolveClose) => hanging.close(() => resolveClose())),
+	);
+	const hangingAddress = hanging.address();
+	if (!hangingAddress || typeof hangingAddress === "string")
+		throw new Error("取消测试服务器未监听 TCP 端口");
+
+	const closed = createServer();
+	await new Promise<void>((resolveListen) =>
+		closed.listen(0, "127.0.0.1", resolveListen),
+	);
+	const closedAddress = closed.address();
+	if (!closedAddress || typeof closedAddress === "string")
+		throw new Error("网络失败测试服务器未监听 TCP 端口");
+	await new Promise<void>((resolveClose) => closed.close(() => resolveClose()));
+
+	const previousNoProxy = process.env.NO_PROXY;
+	process.env.NO_PROXY = "127.0.0.1,localhost";
+	try {
+		const adapter = getAdapter("deepseek", "search");
+		assert.ok(adapter?.search);
+		const controller = new AbortController();
+		const cancelled = adapter.search({
+			query: "cancel",
+			limit: 5,
+			includeDomains: [],
+			excludeDomains: [],
+			signal: controller.signal,
+			maxResponseBytes: 1024,
+			instance: instance("deepseek", {
+				baseUrl: `http://127.0.0.1:${hangingAddress.port}`,
+			}),
+			transport: new DefaultHttpTransport(),
+		});
+		await requestStarted;
+		controller.abort();
+		await assert.rejects(
+			cancelled,
+			(error: unknown) =>
+				typeof error === "object" &&
+				error !== null &&
+				"code" in error &&
+				error.code === "aborted",
+		);
+
+		await assert.rejects(
+			adapter.search({
+				query: "network",
+				limit: 5,
+				includeDomains: [],
+				excludeDomains: [],
+				signal: new AbortController().signal,
+				maxResponseBytes: 1024,
+				instance: instance("deepseek", {
+					baseUrl: `http://127.0.0.1:${closedAddress.port}`,
+				}),
+				transport: new DefaultHttpTransport(),
+			}),
+			(error: unknown) =>
+				typeof error === "object" &&
+				error !== null &&
+				"code" in error &&
+				error.code === "network_error" &&
+				"retryable" in error &&
+				error.retryable === true,
 		);
 	} finally {
 		if (previousNoProxy === undefined) delete process.env.NO_PROXY;

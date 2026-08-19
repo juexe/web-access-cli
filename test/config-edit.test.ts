@@ -57,9 +57,18 @@ test("config edit 创建完整默认配置后再调用系统打开器", async (t
 		{ id: "http", type: "http" },
 		{ id: "anysearch", type: "anysearch", searchFilterMode: "strict" },
 		{ id: "xcrawl", type: "xcrawl", searchFilterMode: "strict" },
+		{ id: "deepseek", type: "deepseek" },
 	]);
 	assert.deepEqual(parsed.search, {
-		providers: ["tavily", "exa", "brave", "searxng", "anysearch", "xcrawl"],
+		providers: [
+			"tavily",
+			"exa",
+			"brave",
+			"searxng",
+			"anysearch",
+			"xcrawl",
+			"deepseek",
+		],
 		limit: 5,
 		timeoutMs: 60_000,
 		attemptTimeoutMs: 20_000,
