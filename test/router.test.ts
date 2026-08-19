@@ -232,6 +232,7 @@ test("auto 仅在前序失败后调用 DeepSeek", async () => {
 								type: "web_search_result",
 								title: "DeepSeek result",
 								url: "https://example.com/deepseek",
+								encrypted_content: "opaque-provider-payload",
 							},
 						],
 					},
@@ -245,6 +246,10 @@ test("auto 仅在前序失败后调用 DeepSeek", async () => {
 		assert.equal(envelope.ok, true);
 		if (!envelope.ok || envelope.command !== "search") return;
 		assert.equal(envelope.provider.id, "deepseek");
+		assert.doesNotMatch(
+			JSON.stringify(envelope.raw),
+			/encrypted_content|opaque-provider-payload/,
+		);
 		assert.deepEqual(
 			envelope.attempts.map((attempt) => [attempt.provider.id, attempt.status]),
 			[

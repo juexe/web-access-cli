@@ -159,7 +159,7 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 
 默认 Route 包含支持对应 Capability 的全部内置 Instance。自定义 ID 会合并到 Instance 列表，但仍需显式加入 Route；省略 Route 时使用上述默认值，显式空数组则禁用对应能力。`auto` 会跳过未完成配置的 Instance；AnySearch 使用默认 base URL 时可匿名调用，XCrawl 和 DeepSeek 则在配置 API key 前被跳过。AnySearch 与 XCrawl 可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
 
-DeepSeek Search 通过 Anthropic-compatible Messages API 调用原生 `web_search_20250305` server tool，一次搜索是完整模型轮次，因此延迟和成本可能高于专用搜索 endpoint。它位于默认 Route 末尾，仅在前序 Provider 未配置或可恢复失败后触发。Adapter 只接受 `web_search_tool_result` 中的结构化 URL，按 URL 合并 citation 摘要，绝不从模型 prose 中猜测 URL。域名条件会改写查询并在本地再次严格过滤；DeepSeek 不支持 `freshness`，遇到该参数时以可恢复错误跳过；重定向会被严格拒绝，且不会访问 `Location` 目标。
+DeepSeek Search 通过 Anthropic-compatible Messages API 调用原生 `web_search_20250305` server tool，一次搜索是完整模型轮次，因此延迟和成本可能高于专用搜索 endpoint。它位于默认 Route 末尾，仅在前序 Provider 未配置或可恢复失败后触发。Adapter 只接受 `web_search_tool_result` 中的结构化 URL，按 URL 合并 citation 摘要，绝不从模型 prose 中猜测 URL。域名条件会改写查询并在本地再次严格过滤；DeepSeek 不支持 `freshness`，遇到该参数时以可恢复错误跳过；重定向会被严格拒绝，且不会访问 `Location` 目标。Provider 私有的 `encrypted_content` 是 CLI 无法展示或解码的 opaque payload，不具备诊断价值，因此会从 `raw` 中移除。
 
 ### 凭据和 URL
 

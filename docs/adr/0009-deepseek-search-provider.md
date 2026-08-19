@@ -13,7 +13,7 @@ DeepSeek 不提供本项目可直接映射的专用搜索 endpoint，但其 Anth
 
 Adapter 固定向 `{baseUrl}/messages` 发送 `deepseek-v4-flash`、`max_tokens: 4096` 与最多 5 次 `web_search_20250305` tool use，并使用 `anthropic-version: 2023-06-01`。请求经过统一 `HttpTransport`，传递调用者 signal 和响应字节上限，并以 `maxRedirects: 0` 严格拒绝重定向；配置 header 不能覆盖实际凭据或固定协议 header。
 
-响应只解析 `web_search_tool_result` 中 `type: web_search_result` 的条目。`text.citations[].cited_text` 按原始 URL 关联为 snippet；模型 prose、thinking、tool-use 控制块、错误条目和 `page_age` 均不进入公共结果。结果继续由 `normalizeHits` 执行 HTTP(S) 校验、去 fragment、去重、域名过滤、排序和 limit 截断。有结果块但内容为空是成功的空结果；完全没有结果块则是可回退的 `provider_error`。
+响应只解析 `web_search_tool_result` 中 `type: web_search_result` 的条目。`text.citations[].cited_text` 按原始 URL 关联为 snippet；模型 prose、thinking、tool-use 控制块、错误条目和 `page_age` 均不进入公共结果。Provider 私有的 `encrypted_content` 是 CLI 无法展示或解码的 opaque payload，不参与映射且不具备诊断价值，因此在 adapter 返回 `raw` 前递归移除。结果继续由 `normalizeHits` 执行 HTTP(S) 校验、去 fragment、去重、域名过滤、排序和 limit 截断。有结果块但内容为空是成功的空结果；完全没有结果块则是可回退的 `provider_error`。
 
 域名约束使用 `site:`/`-site:` 改写查询，并在结果上本地严格复核。DeepSeek 不支持 `freshness`；此类请求在联网前返回可回退的 `provider_unavailable`。默认 Search Route 将 DeepSeek 放在最后，因为一次调用是完整模型轮次，具有比专用检索 endpoint 更高的潜在延迟与 token 费用。
 

@@ -162,6 +162,7 @@ test("DeepSeek 使用固定 Messages 协议并只映射结构化搜索结果", a
 							title: "A",
 							url: "https://example.com/a#fragment",
 							page_age: "2026-08-01",
+							encrypted_content: "opaque-provider-payload",
 						},
 						{
 							type: "web_search_result",
@@ -217,6 +218,11 @@ test("DeepSeek 使用固定 Messages 协议并只映射结构化搜索结果", a
 			snippet: "",
 		},
 	]);
+	assert.doesNotMatch(
+		JSON.stringify(result.raw),
+		/encrypted_content|opaque-provider-payload/,
+	);
+	assert.match(JSON.stringify(result.raw), /web_search_tool_result/);
 });
 
 test("DeepSeek 区分空结果块与缺少结果块", async () => {

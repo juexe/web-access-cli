@@ -37,6 +37,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function sanitizeRaw(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(sanitizeRaw);
+	if (!isRecord(value)) return value;
+	return Object.fromEntries(
+		Object.entries(value)
+			.filter(([key]) => key !== "encrypted_content")
+			.map(([key, item]) => [key, sanitizeRaw(item)]),
+	);
+}
+
 function contentBlocks(
 	response: Record<string, unknown>,
 ): Record<string, unknown>[] {
@@ -82,7 +92,7 @@ function mapResponse(
 			{
 				provider: ref(request.instance),
 				retryable: true,
-				raw: response,
+				raw: sanitizeRaw(response),
 			},
 		);
 
@@ -191,7 +201,7 @@ const deepseek: ProviderAdapter = {
 		);
 		assertOk(response, request.instance);
 		const parsed = parseJsonResponse(response, request.instance);
-		return { data: mapResponse(parsed, request), raw: parsed };
+		return { data: mapResponse(parsed, request), raw: sanitizeRaw(parsed) };
 	},
 };
 
