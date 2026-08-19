@@ -118,6 +118,7 @@ const ALLOWED_INSTANCE_KEYS = new Set([
 ]);
 const ALLOWED_SEARCH_KEYS = new Set([
 	"providers",
+	"_providers",
 	"limit",
 	"timeoutMs",
 	"attemptTimeoutMs",
@@ -125,6 +126,7 @@ const ALLOWED_SEARCH_KEYS = new Set([
 ]);
 const ALLOWED_EXTRACT_KEYS = new Set([
 	"providers",
+	"_providers",
 	"timeoutMs",
 	"attemptTimeoutMs",
 	"maxResponseBytes",
@@ -309,12 +311,26 @@ function parseRoute(value: unknown, path: string): string[] | undefined {
 	return result;
 }
 
+function parseInternalRoute(value: unknown): string[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) return undefined;
+	const result: string[] = [];
+	for (const item of value) {
+		if (typeof item !== "string") return undefined;
+		const id = item.trim();
+		if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || id === "auto") return undefined;
+		result.push(id);
+	}
+	return result;
+}
+
 function parseSearch(value: unknown): Partial<SearchConfig> {
 	if (value === undefined) return {};
 	assertRecord(value, "search");
 	assertKnownKeys(value, ALLOWED_SEARCH_KEYS, "search");
 	return {
 		providers: parseRoute(value.providers, "search.providers"),
+		_providers: parseInternalRoute(value._providers),
 		limit: parseLimit(value.limit),
 		timeoutMs: parsePositiveInt(
 			value.timeoutMs,
@@ -340,6 +356,7 @@ function parseExtract(value: unknown): Partial<ExtractConfig> {
 	assertKnownKeys(value, ALLOWED_EXTRACT_KEYS, "extract");
 	return {
 		providers: parseRoute(value.providers, "extract.providers"),
+		_providers: parseInternalRoute(value._providers),
 		timeoutMs: parsePositiveInt(
 			value.timeoutMs,
 			"extract.timeoutMs",
@@ -439,6 +456,17 @@ function validateRoutes(
 			);
 	}
 	return chosen;
+}
+
+function validInternalRoute(
+	configured: string[],
+	internal: string[] | undefined,
+): string[] | undefined {
+	if (!internal || internal.length !== configured.length) return undefined;
+	if (new Set(internal).size !== internal.length) return undefined;
+	const configuredIds = new Set(configured);
+	if (internal.some((id) => !configuredIds.has(id))) return undefined;
+	return internal;
 }
 
 export function getDefaultConfigPath(): string {
@@ -555,25 +583,23 @@ export function createDefaultAppConfig(): AppConfig {
 	};
 }
 
-export function loadConfig(
-	explicitPath?: string,
-	env: NodeJS.ProcessEnv = process.env,
-): LoadedConfig {
-	const path = resolveConfigPath(explicitPath, env);
-	const defaults = createDefaultAppConfig();
-	let parsed: unknown = {};
-	const exists = existsSync(path);
-	if (exists) {
-		try {
-			parsed = JSON.parse(readFileSync(path, "utf8"));
-		} catch (error) {
-			throw new ConfigError(
-				`无法解析 ${path}: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
-	} else if (explicitPath || env[CONFIG_ENV]) {
-		throw new ConfigError(`配置文件不存在: ${path}`);
+function parseConfigContents(path: string, contents: string): unknown {
+	try {
+		return JSON.parse(contents);
+	} catch (error) {
+		throw new ConfigError(
+			`无法解析 ${path}: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
+}
+
+function buildLoadedConfig(
+	path: string,
+	exists: boolean,
+	parsed: unknown,
+	env: NodeJS.ProcessEnv,
+): LoadedConfig {
+	const defaults = createDefaultAppConfig();
 	const raw = parseRawConfig(parsed);
 	const instanceConfigs = mergeInstances(raw.instances);
 	const searchProviders = validateRoutes(
@@ -586,8 +612,17 @@ export function loadConfig(
 		raw.extract.providers,
 		"extract",
 	);
+	const searchInternalProviders = validInternalRoute(
+		searchProviders,
+		raw.search._providers,
+	);
+	const extractInternalProviders = validInternalRoute(
+		extractProviders,
+		raw.extract._providers,
+	);
 	const search: SearchConfig = {
 		providers: searchProviders,
+		...(searchInternalProviders ? { _providers: searchInternalProviders } : {}),
 		limit: raw.search.limit ?? defaults.search.limit,
 		timeoutMs: raw.search.timeoutMs ?? defaults.search.timeoutMs,
 		attemptTimeoutMs:
@@ -597,6 +632,9 @@ export function loadConfig(
 	};
 	const extract: ExtractConfig = {
 		providers: extractProviders,
+		...(extractInternalProviders
+			? { _providers: extractInternalProviders }
+			: {}),
 		timeoutMs: raw.extract.timeoutMs ?? defaults.extract.timeoutMs,
 		attemptTimeoutMs:
 			raw.extract.attemptTimeoutMs ?? defaults.extract.attemptTimeoutMs,
@@ -616,6 +654,34 @@ export function loadConfig(
 	};
 }
 
+export function loadConfigContents(
+	path: string,
+	contents: string,
+	env: NodeJS.ProcessEnv = process.env,
+): LoadedConfig {
+	return buildLoadedConfig(
+		path,
+		true,
+		parseConfigContents(path, contents),
+		env,
+	);
+}
+
+export function loadConfig(
+	explicitPath?: string,
+	env: NodeJS.ProcessEnv = process.env,
+): LoadedConfig {
+	const path = resolveConfigPath(explicitPath, env);
+	const exists = existsSync(path);
+	if (exists) {
+		return loadConfigContents(path, readFileSync(path, "utf8"), env);
+	}
+	if (explicitPath || env[CONFIG_ENV]) {
+		throw new ConfigError(`配置文件不存在: ${path}`);
+	}
+	return buildLoadedConfig(path, false, {}, env);
+}
+
 export function capabilitySupports(
 	type: ProviderType,
 	capability: Capability,
@@ -629,6 +695,15 @@ export function getRoute(config: AppConfig, capability: Capability): string[] {
 	return capability === "search"
 		? config.search.providers
 		: config.extract.providers;
+}
+
+export function getEffectiveRoute(
+	config: AppConfig,
+	capability: Capability,
+): string[] {
+	const capabilityConfig =
+		capability === "search" ? config.search : config.extract;
+	return capabilityConfig._providers ?? capabilityConfig.providers;
 }
 
 export function getCapabilityConfig(

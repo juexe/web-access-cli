@@ -1,6 +1,7 @@
 import { type TSchema, Type } from "typebox";
 import {
 	CAPABILITIES,
+	CAPABILITY_WARNING_CODES,
 	COMMANDS,
 	FRESHNESS_VALUES,
 	OUTPUT_SCHEMA_VERSION,
@@ -65,6 +66,7 @@ export const SearchConfigSchema = Type.Object(
 		providers: Type.Optional(
 			Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" })),
 		),
+		_providers: Type.Optional(Type.Unknown()),
 		limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
 		timeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
 		attemptTimeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -78,6 +80,7 @@ export const ExtractConfigSchema = Type.Object(
 		providers: Type.Optional(
 			Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" })),
 		),
+		_providers: Type.Optional(Type.Unknown()),
 		timeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
 		attemptTimeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
 		maxResponseBytes: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -159,6 +162,11 @@ const CapabilityAttemptSummarySchema = Type.Object({
 	httpStatus: Type.Optional(Type.Integer()),
 });
 
+const CapabilityWarningSchema = Type.Object({
+	code: literalUnion(CAPABILITY_WARNING_CODES),
+	message: Type.String(),
+});
+
 const CapabilityDebugSchema = Type.Object({
 	request: Type.Unknown(),
 	durationMs: Type.Integer({ minimum: 0 }),
@@ -178,6 +186,7 @@ const SearchSuccessEnvelopeSchema = Type.Object({
 	ok: Type.Literal(true),
 	provider: Type.String(),
 	data: Type.Object({ results: Type.Array(SearchHitSchema) }),
+	warnings: Type.Optional(Type.Array(CapabilityWarningSchema)),
 	debug: Type.Optional(CapabilityDebugSchema),
 });
 
@@ -186,6 +195,7 @@ const ExtractSuccessEnvelopeSchema = Type.Object({
 	ok: Type.Literal(true),
 	provider: Type.String(),
 	data: Type.Object({ document: DocumentSchema }),
+	warnings: Type.Optional(Type.Array(CapabilityWarningSchema)),
 	debug: Type.Optional(CapabilityDebugSchema),
 });
 
@@ -200,6 +210,7 @@ const CapabilityFailureEnvelopeSchema = Type.Object({
 			data: Type.Object({ document: DocumentSchema }),
 		}),
 	),
+	warnings: Type.Optional(Type.Array(CapabilityWarningSchema)),
 	debug: Type.Optional(CapabilityDebugSchema),
 });
 

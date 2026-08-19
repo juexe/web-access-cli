@@ -49,6 +49,7 @@ export interface RouteConfig {
 
 export interface SearchConfig {
 	providers: string[];
+	_providers?: string[];
 	limit: number;
 	timeoutMs: number;
 	attemptTimeoutMs: number;
@@ -57,6 +58,7 @@ export interface SearchConfig {
 
 export interface ExtractConfig {
 	providers: string[];
+	_providers?: string[];
 	timeoutMs: number;
 	attemptTimeoutMs: number;
 	maxResponseBytes: number;
@@ -180,6 +182,27 @@ export interface CapabilityAttemptSummary {
 	httpStatus?: number;
 }
 
+export const CAPABILITY_WARNING_CODES = [
+	"provider_order_update_failed",
+] as const;
+export type CapabilityWarningCode = (typeof CAPABILITY_WARNING_CODES)[number];
+
+export interface CapabilityWarning {
+	code: CapabilityWarningCode;
+	message: string;
+}
+
+export interface ProviderOrderUpdate {
+	capability: Capability;
+	configuredProviders: string[];
+	winner?: string;
+	failed: string[];
+}
+
+export type PersistProviderOrder = (
+	update: ProviderOrderUpdate,
+) => Promise<void>;
+
 export interface CompactErrorInfo {
 	code: ErrorCode;
 	message: string;
@@ -211,6 +234,7 @@ export interface SearchSuccessEnvelope extends BaseEnvelope {
 	ok: true;
 	provider: string;
 	data: SearchData;
+	warnings?: CapabilityWarning[];
 	debug?: CapabilityDebug<SearchRequest>;
 }
 
@@ -218,6 +242,7 @@ export interface ExtractSuccessEnvelope extends BaseEnvelope {
 	ok: true;
 	provider: string;
 	data: ExtractData;
+	warnings?: CapabilityWarning[];
 	debug?: CapabilityDebug<ExtractRequest>;
 }
 
@@ -229,6 +254,7 @@ export interface CapabilityFailureEnvelope extends BaseEnvelope {
 		provider: string;
 		data: ExtractData;
 	};
+	warnings?: CapabilityWarning[];
 	debug?: CapabilityDebug;
 }
 

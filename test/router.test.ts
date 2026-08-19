@@ -8,6 +8,7 @@ import { executeExtract, executeSearch } from "../src/core/router.ts";
 import type {
 	ExtractRequest,
 	OutputEnvelope,
+	ProviderOrderUpdate,
 	SearchRequest,
 } from "../src/core/types.ts";
 import { MockTransport, response } from "./helpers.ts";
@@ -463,6 +464,7 @@ test("auto 不扩大 HTTP 2xx 内嵌业务错误的回退范围", async () => {
 		search: { providers: ["anysearch", "brave"] },
 		extract: { providers: [] },
 	});
+	let writes = 0;
 	try {
 		const transport = new MockTransport(() =>
 			response({ code: 401, message: "business auth failure" }),
@@ -470,6 +472,9 @@ test("auto 不扩大 HTTP 2xx 内嵌业务错误的回退范围", async () => {
 		const envelope = await executeSearch(searchRequest, {
 			loaded: fixture.loaded,
 			transport,
+			persistProviderOrder: async () => {
+				writes += 1;
+			},
 		});
 		assert.equal(envelope.ok, false);
 		if (envelope.ok || "command" in envelope) return;
@@ -478,6 +483,7 @@ test("auto 不扩大 HTTP 2xx 内嵌业务错误的回退范围", async () => {
 		assert.equal(envelope.attempts?.length, 1);
 		assert.equal(envelope.attempts?.[0]?.provider, "anysearch");
 		assert.equal(transport.calls.length, 1);
+		assert.equal(writes, 0);
 	} finally {
 		fixture.cleanup();
 	}
@@ -629,6 +635,170 @@ test("能力命令默认输出精简 envelope，debug 才包含完整诊断", as
 		assert.equal(debug.debug.request.query, "web access");
 		assert.equal(debug.debug?.provider?.id, "brave");
 		assert.equal(debug.debug?.attempts[0]?.status, "success");
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("auto 按内部顺序执行并提交稳定排序证据", async () => {
+	const fixture = loadedConfig({
+		providers: [
+			{ id: "tavily", type: "tavily", apiKey: "tavily-key" },
+			{ id: "brave", type: "brave", apiKey: "brave-key" },
+		],
+		search: {
+			providers: ["tavily", "brave"],
+			_providers: ["brave", "tavily"],
+		},
+		extract: { providers: [] },
+	});
+	const updates: ProviderOrderUpdate[] = [];
+	try {
+		const transport = new MockTransport((url) => {
+			if (url.includes("api.search.brave.com"))
+				return response({ error: "temporary" }, { status: 500 });
+			return response({
+				results: [
+					{
+						title: "Tavily result",
+						url: "https://example.com/tavily",
+						content: "fallback succeeded",
+					},
+				],
+			});
+		});
+		const envelope = await executeSearch(searchRequest, {
+			loaded: fixture.loaded,
+			transport,
+			persistProviderOrder: async (update) => {
+				updates.push(update);
+			},
+		});
+		assert.equal(envelope.ok, true);
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "tavily");
+		assert.match(transport.calls[0]?.url ?? "", /brave/);
+		assert.match(transport.calls[1]?.url ?? "", /tavily/);
+		assert.deepEqual(updates, [
+			{
+				capability: "search",
+				configuredProviders: ["tavily", "brave"],
+				winner: "tavily",
+				failed: ["brave"],
+			},
+		]);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("排序写回失败在成功和失败 envelope 中追加 warning", async () => {
+	const successFixture = loadedConfig({
+		providers: [{ id: "brave", type: "brave", apiKey: "brave-key" }],
+		search: { providers: ["brave"] },
+		extract: { providers: [] },
+	});
+	const failureFixture = loadedConfig({
+		providers: [{ id: "brave", type: "brave", apiKey: "brave-key" }],
+		search: { providers: ["brave"] },
+		extract: { providers: [] },
+	});
+	const rejectWrite = async () => {
+		throw new Error("read only");
+	};
+	try {
+		const success = await executeSearch(searchRequest, {
+			loaded: successFixture.loaded,
+			transport: new MockTransport(() =>
+				response({
+					web: {
+						results: [
+							{
+								title: "Result",
+								url: "https://example.com/result",
+								description: "success",
+							},
+						],
+					},
+				}),
+			),
+			persistProviderOrder: rejectWrite,
+		});
+		assert.equal(success.ok, true);
+		assert.deepEqual("warnings" in success ? success.warnings : undefined, [
+			{
+				code: "provider_order_update_failed",
+				message: "Provider 实际顺序未能保存，下次 auto 可能继续使用旧顺序",
+			},
+		]);
+
+		const failure = await executeSearch(searchRequest, {
+			loaded: failureFixture.loaded,
+			transport: new MockTransport(() =>
+				response({ error: "temporary" }, { status: 500 }),
+			),
+			persistProviderOrder: rejectWrite,
+		});
+		assert.equal(failure.ok, false);
+		assert.deepEqual("warnings" in failure ? failure.warnings : undefined, [
+			{
+				code: "provider_order_update_failed",
+				message: "Provider 实际顺序未能保存，下次 auto 可能继续使用旧顺序",
+			},
+		]);
+	} finally {
+		successFixture.cleanup();
+		failureFixture.cleanup();
+	}
+});
+
+test("显式 provider 和用户取消不更新内部顺序", async () => {
+	const fixture = loadedConfig({
+		providers: [{ id: "brave", type: "brave", apiKey: "brave-key" }],
+		search: { providers: ["brave"] },
+		extract: { providers: [] },
+	});
+	let writes = 0;
+	const persistProviderOrder = async () => {
+		writes += 1;
+	};
+	try {
+		const explicit = await executeSearch(
+			{ ...searchRequest, provider: "brave" },
+			{
+				loaded: fixture.loaded,
+				transport: new MockTransport(() =>
+					response({
+						web: {
+							results: [
+								{
+									title: "Result",
+									url: "https://example.com/result",
+									description: "success",
+								},
+							],
+						},
+					}),
+				),
+				persistProviderOrder,
+			},
+		);
+		assert.equal(explicit.ok, true);
+
+		const controller = new AbortController();
+		controller.abort();
+		const cancelled = await executeSearch(searchRequest, {
+			loaded: fixture.loaded,
+			transport: new MockTransport(() => {
+				throw new DOMException("cancelled", "AbortError");
+			}),
+			signal: controller.signal,
+			persistProviderOrder,
+		});
+		assert.equal(cancelled.ok, false);
+		if (!cancelled.ok && !("command" in cancelled))
+			assert.equal(cancelled.error.code, "aborted");
+		assert.equal(writes, 0);
 	} finally {
 		fixture.cleanup();
 	}

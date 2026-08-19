@@ -56,6 +56,29 @@
             }
           }
         },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "provider_order_update_failed"
+                  }
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        },
         "debug": {
           "type": "object",
           "required": [
@@ -409,6 +432,29 @@
                   "type": "string",
                   "const": "text/markdown"
                 }
+              }
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "provider_order_update_failed"
+                  }
+                ]
+              },
+              "message": {
+                "type": "string"
               }
             }
           }
@@ -814,6 +860,29 @@
                     }
                   }
                 }
+              }
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "provider_order_update_failed"
+                  }
+                ]
+              },
+              "message": {
+                "type": "string"
               }
             }
           }

@@ -1,5 +1,5 @@
 import type { LoadedConfig } from "../config/config.ts";
-import { capabilitySupports } from "../config/config.ts";
+import { capabilitySupports, getEffectiveRoute } from "../config/config.ts";
 import { getAdapter } from "../providers/registry.ts";
 import type {
 	DiagnosticSuccessEnvelope,
@@ -46,8 +46,8 @@ export function executeProviders(
 		durationMs: 0,
 		data: {
 			config: { path: loaded.path, exists: loaded.exists },
-			searchRoute: loaded.app.search.providers,
-			extractRoute: loaded.app.extract.providers,
+			searchRoute: getEffectiveRoute(loaded.app, "search"),
+			extractRoute: getEffectiveRoute(loaded.app, "extract"),
 			providers: loaded.instances.map((instance) =>
 				providerInfo(instance, loaded),
 			),

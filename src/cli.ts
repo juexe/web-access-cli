@@ -9,6 +9,7 @@ import {
 } from "commander";
 import { loadConfig } from "./config/config.ts";
 import { executeConfigEdit } from "./config/edit.ts";
+import { createProviderOrderWriter } from "./config/provider-order.ts";
 import { executeDoctor, executeProviders } from "./core/diagnostics.ts";
 import { asWebAccessError, WebAccessError } from "./core/errors.ts";
 import { errorEnvelope, executeExtract, executeSearch } from "./core/router.ts";
@@ -142,6 +143,7 @@ export function createProgram(
 						loaded,
 						signal: processSignal.signal,
 						debug: options.debug,
+						persistProviderOrder: createProviderOrderWriter(loaded),
 					});
 				});
 			},
@@ -171,6 +173,7 @@ export function createProgram(
 						loaded,
 						signal: processSignal.signal,
 						debug: options.debug,
+						persistProviderOrder: createProviderOrderWriter(loaded),
 					});
 				});
 			},

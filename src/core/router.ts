@@ -1,5 +1,9 @@
 import type { LoadedConfig } from "../config/config.ts";
-import { capabilitySupports } from "../config/config.ts";
+import {
+	capabilitySupports,
+	getEffectiveRoute,
+	getRoute,
+} from "../config/config.ts";
 import { ref } from "../providers/common.ts";
 import { getAdapter } from "../providers/registry.ts";
 import { DefaultHttpTransport, type HttpTransport } from "../transport/http.ts";
@@ -8,6 +12,7 @@ import {
 	type Capability,
 	type CapabilityAttemptSummary,
 	type CapabilityFailureEnvelope,
+	type CapabilityWarning,
 	type Command,
 	type CompactErrorInfo,
 	type ExtractData,
@@ -16,9 +21,11 @@ import {
 	type FailureEnvelope,
 	OUTPUT_SCHEMA_VERSION,
 	type OutputEnvelope,
+	type PersistProviderOrder,
 	type ProviderAttempt,
 	type ProviderExecution,
 	type ProviderInstance,
+	type ProviderOrderUpdate,
 	type SearchData,
 	type SearchRequest,
 	type SearchSuccessEnvelope,
@@ -30,12 +37,14 @@ export interface ExecutionContext {
 	signal?: AbortSignal;
 	now?: () => number;
 	debug?: boolean;
+	persistProviderOrder?: PersistProviderOrder;
 }
 
 interface RunResult<T> {
 	provider: ProviderInstance;
 	execution: ProviderExecution<T>;
 	attempts: ProviderAttempt[];
+	orderUpdate?: ProviderOrderUpdate;
 }
 
 interface RunFailure {
@@ -43,6 +52,7 @@ interface RunFailure {
 	attempts: ProviderAttempt[];
 	raw?: unknown;
 	partial?: { provider: ProviderInstance; data: ExtractData; raw: unknown };
+	orderUpdate?: ProviderOrderUpdate;
 }
 
 function elapsed(start: number, now: () => number): number {
@@ -117,11 +127,12 @@ function resolveInstances(
 	loaded: LoadedConfig,
 	capability: Capability,
 	selected: string,
-): { instances: ProviderInstance[]; automatic: boolean } {
-	const route =
-		capability === "search"
-			? loaded.app.search.providers
-			: loaded.app.extract.providers;
+): {
+	instances: ProviderInstance[];
+	automatic: boolean;
+	configuredProviders: string[];
+} {
+	const route = getRoute(loaded.app, capability);
 	const byId = new Map(
 		loaded.instances.map((instance) => [instance.id, instance]),
 	);
@@ -144,13 +155,18 @@ function resolveInstances(
 				`${selected} 未在 ${capability}.providers route 中启用`,
 				{ provider: ref(instance) },
 			);
-		return { instances: [instance], automatic: false };
+		return {
+			instances: [instance],
+			automatic: false,
+			configuredProviders: route,
+		};
 	}
 	return {
-		instances: route
+		instances: getEffectiveRoute(loaded.app, capability)
 			.map((id) => byId.get(id))
 			.filter((instance): instance is ProviderInstance => !!instance),
 		automatic: true,
+		configuredProviders: route,
 	};
 }
 
@@ -214,7 +230,11 @@ async function runProviders<T>(options: {
 	const now = options.context.now ?? performance.now.bind(performance);
 	const started = now();
 	const transport = options.context.transport ?? new DefaultHttpTransport();
-	let resolved: { instances: ProviderInstance[]; automatic: boolean };
+	let resolved: {
+		instances: ProviderInstance[];
+		automatic: boolean;
+		configuredProviders: string[];
+	};
 	try {
 		resolved = resolveInstances(
 			options.context.loaded,
@@ -225,6 +245,7 @@ async function runProviders<T>(options: {
 		return { error: asWebAccessError(error), attempts: [] };
 	}
 	const attempts: ProviderAttempt[] = [];
+	const failedForOrdering: string[] = [];
 	let lastError: WebAccessError | undefined;
 	let lastRaw: unknown;
 	let partial: RunFailure["partial"];
@@ -246,7 +267,10 @@ async function runProviders<T>(options: {
 				error: error.toInfo(),
 			});
 			lastError = error;
-			if (resolved.automatic) continue;
+			if (resolved.automatic) {
+				failedForOrdering.push(instance.id);
+				continue;
+			}
 			break;
 		}
 
@@ -285,6 +309,7 @@ async function runProviders<T>(options: {
 					error: qualityError.toInfo(),
 				});
 				if (!resolved.automatic || !isFallbackEligible(qualityError)) break;
+				failedForOrdering.push(instance.id);
 				continue;
 			}
 			attempts.push({
@@ -292,7 +317,21 @@ async function runProviders<T>(options: {
 				status: "success",
 				durationMs: elapsed(attemptStarted, now),
 			});
-			return { provider: instance, execution, attempts };
+			return {
+				provider: instance,
+				execution,
+				attempts,
+				...(resolved.automatic
+					? {
+							orderUpdate: {
+								capability: options.capability,
+								configuredProviders: [...resolved.configuredProviders],
+								winner: instance.id,
+								failed: failedForOrdering,
+							},
+						}
+					: {}),
+			};
 		} catch (caught) {
 			const error = normalizeAbort(
 				asWebAccessError(caught, "provider_error"),
@@ -308,6 +347,7 @@ async function runProviders<T>(options: {
 				error: error.toInfo(),
 			});
 			if (!resolved.automatic || !isFallbackEligible(error)) break;
+			failedForOrdering.push(instance.id);
 		}
 	}
 
@@ -336,7 +376,37 @@ async function runProviders<T>(options: {
 		attempts,
 		raw: lastRaw,
 		...(partial ? { partial } : {}),
+		...(resolved.automatic &&
+		failedForOrdering.length > 0 &&
+		!options.context.signal?.aborted
+			? {
+					orderUpdate: {
+						capability: options.capability,
+						configuredProviders: [...resolved.configuredProviders],
+						failed: failedForOrdering,
+					},
+				}
+			: {}),
 	};
+}
+
+async function persistOrderUpdate(
+	context: ExecutionContext,
+	update: ProviderOrderUpdate | undefined,
+): Promise<CapabilityWarning[] | undefined> {
+	if (!update || !context.persistProviderOrder || context.signal?.aborted)
+		return undefined;
+	try {
+		await context.persistProviderOrder(update);
+		return undefined;
+	} catch {
+		return [
+			{
+				code: "provider_order_update_failed",
+				message: "Provider 实际顺序未能保存，下次 auto 可能继续使用旧顺序",
+			},
+		];
+	}
 }
 
 function failureEnvelope(
@@ -346,6 +416,7 @@ function failureEnvelope(
 	result: RunFailure,
 	instances: ProviderInstance[],
 	debug: boolean,
+	warnings?: CapabilityWarning[],
 ): CapabilityFailureEnvelope {
 	const durationMs = elapsed(started, now);
 	const attempts = compactAttempts(result.attempts);
@@ -362,6 +433,7 @@ function failureEnvelope(
 					},
 				}
 			: {}),
+		...(warnings ? { warnings } : {}),
 		...(debug && result.attempts.length > 0
 			? {
 					debug: {
@@ -414,6 +486,7 @@ export async function executeSearch(
 			});
 		},
 	});
+	const warnings = await persistOrderUpdate(context, result.orderUpdate);
 	if ("error" in result)
 		return failureEnvelope(
 			request,
@@ -422,6 +495,7 @@ export async function executeSearch(
 			result,
 			context.loaded.instances,
 			context.debug ?? false,
+			warnings,
 		);
 	const durationMs = elapsed(started, now);
 	const envelope: SearchSuccessEnvelope = {
@@ -429,6 +503,7 @@ export async function executeSearch(
 		ok: true,
 		provider: result.provider.id,
 		data: result.execution.data,
+		...(warnings ? { warnings } : {}),
 		...(context.debug
 			? {
 					debug: {
@@ -484,6 +559,7 @@ export async function executeExtract(
 			);
 		},
 	});
+	const warnings = await persistOrderUpdate(context, result.orderUpdate);
 	if ("error" in result)
 		return failureEnvelope(
 			request,
@@ -492,6 +568,7 @@ export async function executeExtract(
 			result,
 			context.loaded.instances,
 			context.debug ?? false,
+			warnings,
 		);
 	const durationMs = elapsed(started, now);
 	const envelope: ExtractSuccessEnvelope = {
@@ -499,6 +576,7 @@ export async function executeExtract(
 		ok: true,
 		provider: result.provider.id,
 		data: result.execution.data,
+		...(warnings ? { warnings } : {}),
 		...(context.debug
 			? {
 					debug: {

@@ -16,7 +16,7 @@ CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCo
 | `search` | Tavily、Exa、Brave、SearXNG、AnySearch、XCrawl、DeepSeek | `rank`、`title`、`url`、`snippet` |
 | `extract` | Firecrawl v2、Jina Reader、Exa Contents、AnySearch、XCrawl、HTTP | Markdown `Document` |
 
-Provider Type 描述实现类型；Provider Instance 是一份可配置实例。一个 Type 可以有多个 Instance，例如 `exa_team` 和 `exa_personal`。Route 是有序 Instance ID 数组，既决定启用状态，也决定 `auto` 的尝试顺序。
+Provider Type 描述实现类型；Provider Instance 是一份可配置实例。一个 Type 可以有多个 Instance，例如 `exa_team` 和 `exa_personal`。`providers` Route 是有序 Instance ID 数组，决定启用状态和 `auto` 的初始顺序；CLI 会把学习后的实际顺序保存在同级 `_providers`。
 
 ## 安装
 
@@ -108,6 +108,8 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 
 `web-access config edit` 会在配置文件缺失时创建父目录和完整默认配置，再用系统为 JSON 文件关联的默认应用打开；已有文件会原样打开，即使内容暂时不是有效 JSON 也不会被覆盖或格式化。命令只等待系统接受打开请求，不等待编辑器关闭。成功 envelope 的 `data` 包含绝对 `path`、是否新建的 `created` 和 `opened: true`。无法启动默认应用时返回 `open_failed`；如果配置刚刚创建成功，文件仍会保留以便手动打开。
 
+`config edit` 本身不会改写已有内容；能力命令使用 `auto` 成功或发生可回退失败后，会原子更新 `search._providers` 或 `extract._providers`。默认配置尚不存在时，首次产生学习结果的 `auto` 调用会创建完整默认配置。`_providers` 由 CLI 管理，不会启用 `providers` 之外的 Instance；其内容缺失、格式错误、重复、引用未知 ID 或与 `providers` 成员集合不一致时会整组重置。删除 `_providers` 可以手动恢复用户声明的初始顺序。
+
 完整 JSON Schema 位于 [schemas/config.schema.json](schemas/config.schema.json)。示例：
 
 ```json
@@ -182,13 +184,15 @@ DeepSeek Search 通过 Anthropic-compatible Messages API 调用原生 `web_searc
 
 ## 执行与回退
 
-`--provider auto` 按 Route 顺序执行：
+`--provider auto` 按 `_providers` 的有效顺序执行；字段不存在或无效时从 `providers` 开始：
 
 1. 未完成配置的实例会记录为失败 attempt 并跳过。
 2. Provider 返回的最终 HTTP 响应不在 2xx 范围时，包括鉴权、请求、限流和服务器错误，Router 会尝试下一个实例。
 3. 网络错误、超时、响应过大、无可用正文等其他可恢复错误也会继续 Route。
 4. 没有最终非 2xx 响应的不可恢复错误，例如无效输入或在成功响应中检测到不支持的内容，会立即停止。
 5. 所有实例失败时返回 `provider_exhausted`。提取过程中产生的最佳短正文会保留在 `partial`。
+
+每次 `auto` 调用完成后，成功 Instance 移到队头，未尝试 Instance 保持在中间，发生上述可回退失败的 Instance 稳定移到队尾；三组内部顺序不变。所有 Instance 都失败时顺序不变。Search 与 Extract 独立学习；显式 Instance、不可回退错误和用户取消不会更新顺序。写入采用原子替换，并发进程由最后写入者生效。
 
 Attempt 会保留 Provider 的原始错误码、HTTP status 和 `retryable` 值。`retryable` 表示原始操作是否适合对同一 Provider 重试，不再是自动 Route 切换到下一 Provider 的唯一条件。
 
@@ -218,7 +222,7 @@ Attempt 会保留 Provider 的原始错误码、HTTP status 和 `retryable` 值�
 }
 ```
 
-能力命令成功时默认只有 `schemaVersion`、`ok`、最终 Instance ID 和规范化 `data`。失败时包含精简 `error`；实际尝试过 Provider 时，`attempts` 只保留 Instance ID、错误码和可选 HTTP status。提取质量失败可包含不含 raw 的 `partial` 文档。搜索和提取输入错误也使用相同的精简失败结构。
+能力命令成功时默认只有 `schemaVersion`、`ok`、最终 Instance ID 和规范化 `data`。失败时包含精简 `error`；实际尝试过 Provider 时，`attempts` 只保留 Instance ID、错误码和可选 HTTP status。提取质量失败可包含不含 raw 的 `partial` 文档。排序无法写回时，成功或失败 envelope 会额外包含 `warnings: [{ "code": "provider_order_update_failed", "message": "..." }]`，但不会覆盖主要结果。搜索和提取输入错误也使用相同的精简失败结构。
 
 只有协议排障时才在 `search` 或 `extract` 上使用 `--debug`。该选项会增加嵌套 `debug`，其中包含 request、耗时、完整 attempts 以及最终成功或最佳失败的 raw 响应；raw 仍会递归脱敏，常规 Agent 调用不应使用此选项。`providers`、`doctor` 和 `config edit` 保留详细诊断 envelope；所有 envelope 使用 schema version 2。稳定 schema 位于 [schemas](schemas)。
 
@@ -229,7 +233,7 @@ Attempt 会保留 Provider 的原始错误码、HTTP status 和 `retryable` 值�
 - `1`：运行时/provider/doctor/默认应用启动失败
 - `130`：用户取消
 
-`providers` 会列出每个 Instance 的 Type、能力、Route 启用状态、凭据来源和 base URL 来源。`doctor` 只做本地配置检查，不主动调用远端 API；当已启用 Route 中存在未配置 Instance 时，命令返回 `doctor_failed` 和退出码 `1`。
+`providers` 会列出每个 Instance 的 Type、能力、Route 启用状态、凭据来源和 base URL 来源；`searchRoute` 与 `extractRoute` 是下一次 `auto` 使用的有效顺序。`doctor` 只做本地配置检查，不主动调用远端 API；当已启用 Route 中存在未配置 Instance 时，命令返回 `doctor_failed` 和退出码 `1`。
 
 ## HTTP 与安全边界
 

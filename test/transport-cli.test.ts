@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,6 +17,35 @@ import { getAdapter } from "../src/providers/registry.ts";
 import { DefaultHttpTransport } from "../src/transport/http.ts";
 import { VERSION } from "../src/version.ts";
 import { instance } from "./helpers.ts";
+
+function runCli(
+	args: string[],
+	env: NodeJS.ProcessEnv = process.env,
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
+	return new Promise((resolveRun, rejectRun) => {
+		const child = spawn(
+			process.execPath,
+			["--import", "tsx", "src/cli.ts", ...args],
+			{
+				cwd: resolve("."),
+				env,
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
+		let stdout = "";
+		let stderr = "";
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+		child.stdout.on("data", (chunk: string) => {
+			stdout += chunk;
+		});
+		child.stderr.on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+		child.once("error", rejectRun);
+		child.once("close", (status) => resolveRun({ status, stdout, stderr }));
+	});
+}
 
 async function serverUrl(t: TestContext): Promise<string> {
 	const server = createServer((request, response) => {
@@ -221,6 +256,89 @@ test("DeepSeek 通过统一 transport 映射取消与网络失败", async (t) =>
 		if (previousNoProxy === undefined) delete process.env.NO_PROXY;
 		else process.env.NO_PROXY = previousNoProxy;
 	}
+});
+
+test("CLI 将成功 provider 写到队头并在下一进程优先使用", async (t) => {
+	const directory = mkdtempSync(join(tmpdir(), "web-access-cli-order-"));
+	t.after(() => rmSync(directory, { recursive: true, force: true }));
+	const requests = { a: 0, b: 0 };
+	const server = createServer((request, response) => {
+		if (request.url?.startsWith("/a/search")) {
+			requests.a += 1;
+			response.writeHead(500, { "Content-Type": "application/json" });
+			response.end(JSON.stringify({ error: "temporary" }));
+			return;
+		}
+		if (request.url?.startsWith("/b/search")) {
+			requests.b += 1;
+			response.writeHead(200, { "Content-Type": "application/json" });
+			response.end(
+				JSON.stringify({
+					results: [
+						{
+							title: "Learned result",
+							url: "https://example.com/learned",
+							content: "second provider succeeded",
+						},
+					],
+				}),
+			);
+			return;
+		}
+		response.writeHead(404).end();
+	});
+	await new Promise<void>((resolveListen) =>
+		server.listen(0, "127.0.0.1", resolveListen),
+	);
+	t.after(
+		() =>
+			new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+	);
+	const address = server.address();
+	if (!address || typeof address === "string")
+		throw new Error("自适应排序测试服务器未监听 TCP 端口");
+
+	const path = join(directory, "config.json");
+	writeFileSync(
+		path,
+		JSON.stringify({
+			providers: [
+				{
+					id: "search_a",
+					type: "searxng",
+					baseUrl: `http://127.0.0.1:${address.port}/a`,
+				},
+				{
+					id: "search_b",
+					type: "searxng",
+					baseUrl: `http://127.0.0.1:${address.port}/b`,
+				},
+			],
+			search: { providers: ["search_a", "search_b"] },
+			extract: { providers: ["http"] },
+		}),
+		"utf8",
+	);
+	const env = {
+		...process.env,
+		NO_PROXY: "127.0.0.1,localhost",
+		WEB_ACCESS_CONFIG: "",
+	};
+
+	const first = await runCli(["--config", path, "search", "adaptive"], env);
+	assert.equal(first.status, 0);
+	assert.equal(first.stderr, "");
+	assert.equal(JSON.parse(first.stdout).provider, "search_b");
+	assert.deepEqual(JSON.parse(readFileSync(path, "utf8")).search._providers, [
+		"search_b",
+		"search_a",
+	]);
+
+	const second = await runCli(["--config", path, "search", "adaptive"], env);
+	assert.equal(second.status, 0);
+	assert.equal(second.stderr, "");
+	assert.equal(JSON.parse(second.stdout).provider, "search_b");
+	assert.deepEqual(requests, { a: 1, b: 2 });
 });
 
 test("CLI 输入错误也只在 stdout 输出一个 JSON envelope，并返回退出码 2", () => {

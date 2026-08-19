@@ -52,10 +52,12 @@ DeepSeek Search Provider 的 Anthropic-compatible Messages wire shape、结构�
 
 - `@mozilla/readability`：Apache-2.0
 - `commander`：MIT
+- `jsonc-parser`：MIT
 - `linkedom`：ISC
 - `open`：MIT
 - `turndown`：MIT
 - `typebox`：MIT
 - `undici`：MIT
+- `write-file-atomic`：ISC
 
 开发依赖包括 Biome、tsx、TypeScript 及对应类型包。各组件的完整许可证和版权声明以随 npm 包发布的许可证文件及其上游仓库为准。本文件不替代任何第三方许可证。

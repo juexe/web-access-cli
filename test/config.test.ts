@@ -7,6 +7,7 @@ import {
 	ConfigError,
 	capabilitySupports,
 	getDefaultConfigPath,
+	getEffectiveRoute,
 	loadConfig,
 	resolveConfigPath,
 } from "../src/config/config.ts";
@@ -362,5 +363,67 @@ test("只读取显式或用户级配置路径", () => {
 		);
 	} finally {
 		fixture.cleanup();
+	}
+});
+
+test("内部 provider 顺序与用户 route 分离并用于诊断", () => {
+	const fixture = configFile({
+		providers: [
+			{ id: "search_a", type: "searxng", baseUrl: "https://a.test" },
+			{ id: "search_b", type: "searxng", baseUrl: "https://b.test" },
+		],
+		search: {
+			providers: ["search_a", "search_b"],
+			_providers: ["search_b", "search_a"],
+		},
+		extract: { providers: ["http"], _providers: ["http"] },
+	});
+	try {
+		const loaded = loadConfig(fixture.path, {});
+		assert.deepEqual(loaded.app.search.providers, ["search_a", "search_b"]);
+		assert.deepEqual(getEffectiveRoute(loaded.app, "search"), [
+			"search_b",
+			"search_a",
+		]);
+		const data = executeProviders(loaded).data as {
+			searchRoute: string[];
+			extractRoute: string[];
+		};
+		assert.deepEqual(data.searchRoute, ["search_b", "search_a"]);
+		assert.deepEqual(data.extractRoute, ["http"]);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("无效或失配的内部 provider 顺序整组重置", () => {
+	const invalidValues = [
+		["search_a", "search_a"],
+		["search_a", "ghost"],
+		["search_a"],
+		"search_a",
+	];
+	for (const internal of invalidValues) {
+		const fixture = configFile({
+			providers: [
+				{ id: "search_a", type: "searxng", baseUrl: "https://a.test" },
+				{ id: "search_b", type: "searxng", baseUrl: "https://b.test" },
+			],
+			search: {
+				providers: ["search_a", "search_b"],
+				_providers: internal,
+			},
+			extract: { providers: ["http"] },
+		});
+		try {
+			const loaded = loadConfig(fixture.path, {});
+			assert.deepEqual(getEffectiveRoute(loaded.app, "search"), [
+				"search_a",
+				"search_b",
+			]);
+			assert.equal(loaded.app.search._providers, undefined);
+		} finally {
+			fixture.cleanup();
+		}
 	}
 });

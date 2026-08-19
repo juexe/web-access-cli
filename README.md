@@ -16,7 +16,7 @@ The CLI is the primary product interface. It is not tied to Pi, Claude Code, Cod
 | `search` | Tavily, Exa, Brave, SearXNG, AnySearch, XCrawl, DeepSeek | `rank`, `title`, `url`, `snippet` |
 | `extract` | Firecrawl v2, Jina Reader, Exa Contents, AnySearch, XCrawl, HTTP | Markdown `Document` |
 
-A provider type describes an implementation, while a provider instance is a configurable instance of that type. One type can have multiple instances, such as `exa_team` and `exa_personal`. A route is an ordered array of instance IDs that determines both which instances are enabled and the order in which `auto` tries them.
+A provider type describes an implementation, while a provider instance is a configurable instance of that type. One type can have multiple instances, such as `exa_team` and `exa_personal`. A `providers` route is an ordered array of instance IDs that determines which instances are enabled and the initial `auto` order. The CLI stores the learned effective order in the sibling `_providers` field.
 
 ## Installation
 
@@ -108,6 +108,8 @@ The default path on every platform is `~/.config/web-access-cli/config.json`, wh
 
 `web-access config edit` creates parent directories and a complete default configuration when the file is missing, then opens it with the operating system's default application for JSON files. An existing file is opened byte-for-byte as-is, even when it is temporarily invalid JSON; it is never overwritten or reformatted. The command waits only for the operating system to accept the open request, not for the editor to close. On success, envelope `data` contains the absolute `path`, `created`, and `opened: true`. A default-application launch failure returns `open_failed`; a configuration file that was created successfully remains available for manual editing.
 
+`config edit` itself never rewrites existing content. After an `auto` capability call succeeds or encounters fallback-eligible failures, the CLI atomically updates `search._providers` or `extract._providers`. If the default configuration does not exist, the first `auto` call that produces a learning result creates the complete default configuration. `_providers` is CLI-managed and cannot enable an instance outside `providers`. Missing, malformed, duplicate, unknown, or membership-mismatched internal entries reset the whole capability to the declared route. Delete `_providers` to restore the user-declared initial order manually.
+
 The complete JSON Schema is available at [schemas/config.schema.json](schemas/config.schema.json). Example:
 
 ```json
@@ -182,13 +184,15 @@ Custom instances use `apiKeyEnv` and `baseUrlEnv` to name their environment vari
 
 ## Execution and fallback
 
-`--provider auto` follows the configured route order:
+`--provider auto` follows the effective `_providers` order, or starts from `providers` when the internal field is absent or invalid:
 
 1. An instance with incomplete configuration is recorded as a failed attempt and skipped.
 2. A final provider HTTP response outside 2xx, including authentication, request, rate-limit, and server errors, causes the router to try the next instance.
 3. Other recoverable errors, including network errors, timeouts, oversized responses, and missing usable content, also cause the router to continue.
 4. Non-recoverable failures without a final non-2xx response, including invalid input and unsupported content detected in a successful response, stop execution immediately.
 5. If every instance fails, the command returns `provider_exhausted`. The best short content produced during extraction is preserved in `partial`.
+
+After each `auto` call, a successful instance moves to the front, untried instances remain in the middle, and instances with the fallback-eligible failures above move stably to the back. Relative order within each group is preserved. The order stays unchanged when every instance fails. Search and Extract learn independently; explicit instances, non-fallback failures, and user cancellation never update the order. Writes use atomic replacement, and the last writer wins across concurrent processes.
 
 An attempt keeps the provider's original error code, HTTP status, and `retryable` value. `retryable` describes whether the original operation can be retried against the same provider; it is not the sole condition for switching to the next provider in an automatic route.
 
@@ -218,7 +222,7 @@ Capability commands use output schema version 2. Their default envelope is inten
 }
 ```
 
-Default capability output contains only `schemaVersion`, `ok`, the final Instance ID and normalized `data`. Failures contain a compact `error` and, when providers were attempted, `attempts` entries with only Instance ID, error code and optional HTTP status. Extract quality failures may include a `partial` document without raw provider data. Search and extract input errors use the same compact failure shape.
+Default capability output contains only `schemaVersion`, `ok`, the final Instance ID and normalized `data`. Failures contain a compact `error` and, when providers were attempted, `attempts` entries with only Instance ID, error code and optional HTTP status. Extract quality failures may include a `partial` document without raw provider data. If the learned order cannot be written, either a success or failure envelope additionally contains `warnings: [{ "code": "provider_order_update_failed", "message": "..." }]` without replacing the primary result. Search and extract input errors use the same compact failure shape.
 
 Use `--debug` on `search` or `extract` only for protocol troubleshooting. It adds a nested `debug` object containing the request, durations, complete attempts and the final or best-failure raw response. Raw data remains recursively redacted and is not part of normal Agent calls. `providers`, `doctor`, and `config edit` retain their detailed diagnostic envelopes; all envelopes use schema version 2. Stable schemas are available in [schemas](schemas).
 
@@ -229,7 +233,7 @@ Exit codes:
 - `1`: Runtime, provider, doctor, or default-application launch failure
 - `130`: User cancellation
 
-`providers` lists each instance's type, capabilities, route status, credential source, and base URL source. `doctor` performs local configuration checks only and does not call remote APIs. If an enabled route contains an unconfigured instance, the command returns `doctor_failed` with exit code `1`.
+`providers` lists each instance's type, capabilities, route status, credential source, and base URL source. Its `searchRoute` and `extractRoute` fields show the effective order for the next `auto` call. `doctor` performs local configuration checks only and does not call remote APIs. If an enabled route contains an unconfigured instance, the command returns `doctor_failed` with exit code `1`.
 
 ## HTTP and security boundaries
 
