@@ -104,7 +104,7 @@ test("显式 provider 严格执行，不触发 fallback", async () => {
 
 test("auto 全部失败时返回 provider_exhausted 与最佳 partial", async () => {
 	const fixture = loadedConfig({
-		search: { providers: [] },
+		search: { providers: ["tavily"] },
 		extract: {
 			providers: ["http"],
 			minContentCharacters: 100,
@@ -340,7 +340,7 @@ test("Bocha HTTP 403 记录 quota_exceeded 并自动回退", async () => {
 
 test("extract auto 在前序 provider 返回非 2xx 后继续 route", async () => {
 	const fixture = loadedConfig({
-		search: { providers: [] },
+		search: { providers: ["tavily"] },
 		extract: {
 			providers: ["jina", "http"],
 			minContentCharacters: 5,
@@ -470,7 +470,7 @@ test("auto 在前序成功时不调用 DeepSeek", async () => {
 			{ id: "brave", type: "brave", apiKey: "brave-key" },
 			{ id: "deepseek", type: "deepseek", apiKey: "deepseek-key" },
 		],
-		search: { providers: ["brave", "deepseek"] },
+		search: { providers: ["brave"], providers_fallback: ["deepseek"] },
 		extract: { providers: [] },
 	});
 	try {
@@ -495,6 +495,138 @@ test("auto 在前序成功时不调用 DeepSeek", async () => {
 		assert.equal(envelope.ok, true);
 		if (!hasProvider(envelope)) return;
 		assert.equal(envelope.provider, "brave");
+		assert.equal(transport.calls.length, 1);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("主轮全部失败后才进入 fallback，并分别提交两组顺序", async () => {
+	const fixture = loadedConfig({
+		providers: [
+			{ id: "brave", type: "brave", apiKey: "brave-key" },
+			{ id: "tavily", type: "tavily", apiKey: "tavily-key" },
+		],
+		search: {
+			providers: ["brave"],
+			providers_fallback: ["tavily"],
+		},
+		extract: { providers: ["http"] },
+	});
+	const updates: ProviderOrderUpdate[] = [];
+	try {
+		const transport = new MockTransport((url) => {
+			if (url.includes("api.search.brave.com"))
+				return response({ error: "temporary" }, { status: 500 });
+			return response({
+				results: [
+					{
+						title: "Fallback result",
+						url: "https://example.com/fallback",
+						content: "fallback succeeded",
+					},
+				],
+			});
+		});
+		const envelope = await executeSearch(searchRequest, {
+			loaded: fixture.loaded,
+			transport,
+			debug: true,
+			persistProviderOrder: async (batch) => {
+				updates.push(...batch);
+			},
+		});
+		assert.equal(envelope.ok, true);
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "tavily");
+		assert.deepEqual(
+			envelope.debug?.attempts.map((attempt) => [
+				attempt.provider.id,
+				attempt.status,
+			]),
+			[
+				["brave", "failed"],
+				["tavily", "success"],
+			],
+		);
+		assert.deepEqual(updates, [
+			{
+				capability: "search",
+				route: "providers",
+				configuredProviders: ["brave"],
+				failed: ["brave"],
+			},
+			{
+				capability: "search",
+				route: "providers_fallback",
+				configuredProviders: ["tavily"],
+				winner: "tavily",
+				failed: [],
+			},
+		]);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("主轮不可回退错误不会调用 fallback", async () => {
+	const fixture = loadedConfig({
+		providers: [
+			{ id: "anysearch", type: "anysearch" },
+			{ id: "tavily", type: "tavily", apiKey: "tavily-key" },
+		],
+		search: {
+			providers: ["anysearch"],
+			providers_fallback: ["tavily"],
+		},
+		extract: { providers: ["http"] },
+	});
+	try {
+		const transport = new MockTransport(() =>
+			response({ code: 401, message: "unauthorized" }),
+		);
+		const envelope = await executeSearch(searchRequest, {
+			loaded: fixture.loaded,
+			transport,
+		});
+		assert.equal(envelope.ok, false);
+		if (envelope.ok || "command" in envelope) return;
+		assert.equal(envelope.error.code, "auth_error");
+		assert.equal(transport.calls.length, 1);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("显式指定 fallback provider 只执行一次", async () => {
+	const fixture = loadedConfig({
+		providers: [
+			{ id: "brave", type: "brave", apiKey: "brave-key" },
+			{ id: "tavily", type: "tavily", apiKey: "tavily-key" },
+		],
+		search: {
+			providers: ["brave"],
+			providers_fallback: ["tavily"],
+		},
+		extract: { providers: ["http"] },
+	});
+	try {
+		const transport = new MockTransport(() =>
+			response({
+				results: [
+					{
+						title: "Explicit fallback",
+						url: "https://example.com/explicit",
+						content: "direct",
+					},
+				],
+			}),
+		);
+		const envelope = await executeSearch(
+			{ ...searchRequest, provider: "tavily" },
+			{ loaded: fixture.loaded, transport },
+		);
+		assert.equal(envelope.ok, true);
 		assert.equal(transport.calls.length, 1);
 	} finally {
 		fixture.cleanup();
@@ -565,8 +697,7 @@ test("auto 按内部顺序执行并提交稳定排序证据", async () => {
 			{ id: "brave", type: "brave", apiKey: "brave-key" },
 		],
 		search: {
-			providers: ["tavily", "brave"],
-			_providers: ["brave", "tavily"],
+			providers: ["brave", "tavily"],
 		},
 		extract: { providers: [] },
 	});
@@ -588,8 +719,8 @@ test("auto 按内部顺序执行并提交稳定排序证据", async () => {
 		const envelope = await executeSearch(searchRequest, {
 			loaded: fixture.loaded,
 			transport,
-			persistProviderOrder: async (update) => {
-				updates.push(update);
+			persistProviderOrder: async (batch) => {
+				updates.push(...batch);
 			},
 		});
 		assert.equal(envelope.ok, true);
@@ -600,7 +731,8 @@ test("auto 按内部顺序执行并提交稳定排序证据", async () => {
 		assert.deepEqual(updates, [
 			{
 				capability: "search",
-				configuredProviders: ["tavily", "brave"],
+				route: "providers",
+				configuredProviders: ["brave", "tavily"],
 				winner: "tavily",
 				failed: ["brave"],
 			},

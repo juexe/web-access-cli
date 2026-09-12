@@ -1,6 +1,6 @@
 # ADR 0012：持久化自适应 Provider 顺序
 
-- 状态：已接受
+- 状态：已被 ADR 0017 取代
 - 日期：2026-08-19
 
 ## 背景
@@ -9,7 +9,7 @@ CLI 每次能力调用都是独立进程。固定 Route 会让暂时异常或长
 
 ## 决策
 
-`search.providers` 与 `extract.providers` 继续定义启用集合和初始顺序；同级 `_providers` 由 CLI 保存对应 Capability 的实际顺序。所有 `--provider auto` 调用使用有效 `_providers`，显式 Instance 仍严格执行且不参与学习。内部数组缺失、格式错误、重复、引用未知 ID 或与用户 Route 成员集合不一致时整组重置；删除 `_providers` 可以手动恢复初始顺序。
+本 ADR 的隐藏 `_providers` 状态字段方案已由 ADR 0017 取代。历史上该方案曾将用户 Route 与 CLI 学习顺序分离。
 
 学习沿用 ADR 0010 的 Route 切换资格。成功 Instance 置于队头，未尝试 Instance 保持在中间，符合回退资格的失败 Instance 稳定移到队尾，各组保留原相对顺序。全员失败时顺序不变；不可回退错误和用户取消不更新状态。
 

@@ -10,6 +10,7 @@ import {
 import { type CliOutputMode, formatMarkdown } from "./cli-output.ts";
 import { loadConfig } from "./config/config.ts";
 import { executeConfigEdit } from "./config/edit.ts";
+import { executeConfigInit } from "./config/init.ts";
 import { createProviderOrderWriter } from "./config/provider-order.ts";
 import { executeDoctor, executeProviders } from "./core/diagnostics.ts";
 import { asWebAccessError, WebAccessError } from "./core/errors.ts";
@@ -32,6 +33,7 @@ interface GlobalOptions {
 
 interface CliDependencies {
 	executeConfigEdit?: typeof executeConfigEdit;
+	executeConfigInit?: typeof executeConfigInit;
 }
 
 function collect(value: string, previous: string[]): string[] {
@@ -77,6 +79,15 @@ function writeEnvelope(envelope: OutputEnvelope): void {
 }
 
 function writeOutput(envelope: OutputEnvelope, mode: CliOutputMode): void {
+	if (
+		mode === "path" &&
+		envelope.ok &&
+		"command" in envelope &&
+		envelope.command === "config.init"
+	) {
+		process.stdout.write(`${envelope.data.path}\n`);
+		return;
+	}
 	if (mode === "markdown" && envelope.ok) {
 		process.stdout.write(formatMarkdown(envelope));
 		return;
@@ -93,6 +104,7 @@ export function createProgram(
 ): Command {
 	const program = new Command();
 	const runConfigEdit = dependencies.executeConfigEdit ?? executeConfigEdit;
+	const runConfigInit = dependencies.executeConfigInit ?? executeConfigInit;
 	program
 		.name("web-access")
 		.description("Agent-neutral 的网页搜索与内容提取 CLI")
@@ -226,6 +238,17 @@ export function createProgram(
 		);
 
 	const config = program.command("config").description("管理配置文件");
+	config
+		.command("init")
+		.description("按当前标准凭据环境变量创建配置")
+		.option("--json", "输出 JSON envelope", false)
+		.action((options: { json: boolean }) => {
+			const globals = program.optsWithGlobals<GlobalOptions>();
+			run(
+				() => runConfigInit({ explicitPath: globals.config }),
+				options.json || globals.json ? "json" : "path",
+			);
+		});
 	config
 		.command("edit")
 		.description("创建默认配置文件并用 VISUAL 或 EDITOR 打开")

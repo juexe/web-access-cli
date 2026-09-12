@@ -6,7 +6,7 @@ import type {
 	SearchSuccessEnvelope,
 } from "./core/types.ts";
 
-export type CliOutputMode = "json" | "markdown";
+export type CliOutputMode = "json" | "markdown" | "path";
 
 function yamlScalar(value: string): string {
 	return JSON.stringify(value);

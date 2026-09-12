@@ -86,7 +86,9 @@ export const SearchConfigSchema = Type.Object(
 		providers: Type.Optional(
 			Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" })),
 		),
-		_providers: Type.Optional(Type.Unknown()),
+		providers_fallback: Type.Optional(
+			Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" })),
+		),
 		limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
 		timeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
 		attemptTimeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -100,7 +102,9 @@ export const ExtractConfigSchema = Type.Object(
 		providers: Type.Optional(
 			Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" })),
 		),
-		_providers: Type.Optional(Type.Unknown()),
+		providers_fallback: Type.Optional(
+			Type.Array(Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" })),
+		),
 		timeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
 		attemptTimeoutMs: Type.Optional(Type.Integer({ minimum: 1 })),
 		maxResponseBytes: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -254,6 +258,21 @@ const ConfigEditSuccessEnvelopeSchema = Type.Object({
 	}),
 });
 
+const ConfigInitSuccessEnvelopeSchema = Type.Object({
+	schemaVersion: Type.Literal(OUTPUT_SCHEMA_VERSION),
+	ok: Type.Literal(true),
+	command: Type.Literal("config.init"),
+	durationMs: Type.Integer({ minimum: 0 }),
+	data: Type.Object({
+		path: Type.String(),
+		created: Type.Literal(true),
+		searchProviders: Type.Array(Type.String()),
+		searchFallbackProviders: Type.Array(Type.String()),
+		extractProviders: Type.Array(Type.String()),
+		extractFallbackProviders: Type.Array(Type.String()),
+	}),
+});
+
 const FailureEnvelopeSchema = Type.Object({
 	schemaVersion: Type.Literal(OUTPUT_SCHEMA_VERSION),
 	ok: Type.Literal(false),
@@ -261,6 +280,7 @@ const FailureEnvelopeSchema = Type.Object({
 		Type.Literal("providers"),
 		Type.Literal("doctor"),
 		Type.Literal("config.edit"),
+		Type.Literal("config.init"),
 		Type.Null(),
 	]),
 	durationMs: Type.Integer({ minimum: 0 }),
@@ -273,6 +293,7 @@ export const OutputEnvelopeSchema: TSchema = Type.Union([
 	CapabilityFailureEnvelopeSchema,
 	DiagnosticSuccessEnvelopeSchema,
 	ConfigEditSuccessEnvelopeSchema,
+	ConfigInitSuccessEnvelopeSchema,
 	FailureEnvelopeSchema,
 ]);
 

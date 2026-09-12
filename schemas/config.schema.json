@@ -237,7 +237,13 @@
             "pattern": "^[a-z][a-z0-9_-]{0,63}$"
           }
         },
-        "_providers": {},
+        "providers_fallback": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          }
+        },
         "limit": {
           "type": "integer",
           "minimum": 1,
@@ -268,7 +274,13 @@
             "pattern": "^[a-z][a-z0-9_-]{0,63}$"
           }
         },
-        "_providers": {},
+        "providers_fallback": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          }
+        },
         "timeoutMs": {
           "type": "integer",
           "minimum": 1

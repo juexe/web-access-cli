@@ -8,7 +8,7 @@ import type {
 	ProviderOrderUpdate,
 } from "../core/types.ts";
 import {
-	getEffectiveRoute,
+	getFallbackRoute,
 	getRoute,
 	type LoadedConfig,
 	loadConfigContents,
@@ -40,20 +40,21 @@ function desiredOrder(
 	latest: LoadedConfig,
 	update: ProviderOrderUpdate,
 ): string[] {
-	const configured = getRoute(latest.app, update.capability);
+	const configured =
+		update.route === "providers"
+			? getRoute(latest.app, update.capability)
+			: getFallbackRoute(latest.app, update.capability);
 	if (!sameMembers(configured, update.configuredProviders)) return configured;
-	return reorderProviders(
-		getEffectiveRoute(latest.app, update.capability),
-		update,
-	);
+	return reorderProviders(configured, update);
 }
 
 function updateText(
 	contents: string,
 	capability: Capability,
+	route: ProviderOrderUpdate["route"],
 	providers: string[],
 ): string {
-	const edits = modify(contents, [capability, "_providers"], providers, {
+	const edits = modify(contents, [capability, route], providers, {
 		formattingOptions: {
 			insertSpaces: true,
 			tabSize: 2,
@@ -65,18 +66,23 @@ function updateText(
 
 export async function persistProviderOrder(
 	loaded: LoadedConfig,
-	update: ProviderOrderUpdate,
+	updates: ProviderOrderUpdate[],
 	env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
+	if (updates.length === 0) return;
 	if (!loaded.exists) await ensureConfigFile(loaded.path);
 	const target = await writableTarget(loaded.path);
 	const contents = await readFile(target, "utf8");
 	const latest = loadConfigContents(target, contents, env);
-	const updated = updateText(
-		contents,
-		update.capability,
-		desiredOrder(latest, update),
-	);
+	let updated = contents;
+	for (const update of updates) {
+		updated = updateText(
+			updated,
+			update.capability,
+			update.route,
+			desiredOrder(latest, update),
+		);
+	}
 	if (updated === contents) return;
 	await writeFileAtomic(target, updated, { encoding: "utf8", fsync: true });
 }

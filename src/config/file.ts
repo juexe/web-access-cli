@@ -119,3 +119,37 @@ export async function ensureConfigFile(path: string): Promise<boolean> {
 	}
 	return true;
 }
+
+export async function writeNewConfigFile(
+	path: string,
+	contents: string,
+): Promise<void> {
+	if (await existingConfigFile(path))
+		throw configFileError(`配置文件已存在: ${path}`, path);
+
+	try {
+		await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+	} catch (error) {
+		throw configFileError(`无法创建配置目录: ${dirname(path)}`, path, error);
+	}
+
+	let handle: FileHandle;
+	try {
+		handle = await openFile(path, "wx", 0o600);
+	} catch (error) {
+		if (hasCode(error, "EEXIST"))
+			throw configFileError(`配置文件已存在: ${path}`, path);
+		throw configFileError(`无法创建配置文件: ${path}`, path, error);
+	}
+
+	const created = await handle.stat();
+	try {
+		await handle.writeFile(contents, "utf8");
+		await handle.sync();
+	} catch (error) {
+		await handle.close().catch(() => undefined);
+		await removeIncompleteFile(path, created);
+		throw configFileError(`无法写入配置文件: ${path}`, path, error);
+	}
+	await handle.close();
+}

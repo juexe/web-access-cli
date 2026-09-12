@@ -1,5 +1,9 @@
 import type { LoadedConfig } from "../config/config.ts";
-import { capabilitySupports, getEffectiveRoute } from "../config/config.ts";
+import {
+	capabilitySupports,
+	getFallbackRoute,
+	getRoute,
+} from "../config/config.ts";
 import { getAdapter } from "../providers/registry.ts";
 import type {
 	DiagnosticSuccessEnvelope,
@@ -12,8 +16,12 @@ function providerInfo(
 	instance: ProviderInstance,
 	loaded: LoadedConfig,
 ): Record<string, unknown> {
-	const searchEnabled = loaded.app.search.providers.includes(instance.id);
-	const extractEnabled = loaded.app.extract.providers.includes(instance.id);
+	const searchEnabled =
+		loaded.app.search.providers.includes(instance.id) ||
+		loaded.app.search.providers_fallback.includes(instance.id);
+	const extractEnabled =
+		loaded.app.extract.providers.includes(instance.id) ||
+		loaded.app.extract.providers_fallback.includes(instance.id);
 	const adapter =
 		getAdapter(instance.type, "search") ?? getAdapter(instance.type, "extract");
 	return {
@@ -46,8 +54,10 @@ export function executeProviders(
 		durationMs: 0,
 		data: {
 			config: { path: loaded.path, exists: loaded.exists },
-			searchRoute: getEffectiveRoute(loaded.app, "search"),
-			extractRoute: getEffectiveRoute(loaded.app, "extract"),
+			searchRoute: getRoute(loaded.app, "search"),
+			searchFallbackRoute: getFallbackRoute(loaded.app, "search"),
+			extractRoute: getRoute(loaded.app, "extract"),
+			extractFallbackRoute: getFallbackRoute(loaded.app, "extract"),
 			providers: loaded.instances.map((instance) =>
 				providerInfo(instance, loaded),
 			),
@@ -61,12 +71,14 @@ export function executeDoctor(
 	const providers = loaded.instances.map((instance) => {
 		const checks = {
 			search:
-				!loaded.app.search.providers.includes(instance.id) ||
+				(!loaded.app.search.providers.includes(instance.id) &&
+					!loaded.app.search.providers_fallback.includes(instance.id)) ||
 				(!!getAdapter(instance.type, "search") &&
 					(getAdapter(instance.type, "search")?.isConfigured(instance) ??
 						false)),
 			extract:
-				!loaded.app.extract.providers.includes(instance.id) ||
+				(!loaded.app.extract.providers.includes(instance.id) &&
+					!loaded.app.extract.providers_fallback.includes(instance.id)) ||
 				(!!getAdapter(instance.type, "extract") &&
 					(getAdapter(instance.type, "extract")?.isConfigured(instance) ??
 						false)),

@@ -1427,6 +1427,78 @@
         "ok",
         "command",
         "durationMs",
+        "data"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 2
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "command": {
+          "type": "string",
+          "const": "config.init"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "path",
+            "created",
+            "searchProviders",
+            "searchFallbackProviders",
+            "extractProviders",
+            "extractFallbackProviders"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "created": {
+              "type": "boolean",
+              "const": true
+            },
+            "searchProviders": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "searchFallbackProviders": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "extractProviders": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "extractFallbackProviders": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "ok",
+        "command",
+        "durationMs",
         "error"
       ],
       "properties": {
@@ -1451,6 +1523,10 @@
             {
               "type": "string",
               "const": "config.edit"
+            },
+            {
+              "type": "string",
+              "const": "config.init"
             },
             {
               "type": "null"

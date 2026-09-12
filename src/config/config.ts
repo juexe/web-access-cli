@@ -24,7 +24,10 @@ export const DEFAULT_SEARCH_PROVIDERS = [
 	"searxng",
 	"anysearch",
 	"xcrawl",
+] as const;
+export const DEFAULT_SEARCH_FALLBACK_PROVIDERS = [
 	"deepseek",
+	"xai_x_search",
 	"xai_web_search",
 ] as const;
 export const DEFAULT_EXTRACT_PROVIDERS = [
@@ -33,12 +36,13 @@ export const DEFAULT_EXTRACT_PROVIDERS = [
 	"exa",
 	"anysearch",
 	"xcrawl",
-	"http",
 ] as const;
+export const DEFAULT_EXTRACT_FALLBACK_PROVIDERS = ["http"] as const;
 export const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 
 const DEFAULT_SEARCH_CONFIG: SearchConfig = {
 	providers: [...DEFAULT_SEARCH_PROVIDERS],
+	providers_fallback: [...DEFAULT_SEARCH_FALLBACK_PROVIDERS],
 	limit: 5,
 	timeoutMs: 120_000,
 	attemptTimeoutMs: 60_000,
@@ -47,6 +51,7 @@ const DEFAULT_SEARCH_CONFIG: SearchConfig = {
 
 const DEFAULT_EXTRACT_CONFIG: ExtractConfig = {
 	providers: [...DEFAULT_EXTRACT_PROVIDERS],
+	providers_fallback: [...DEFAULT_EXTRACT_FALLBACK_PROVIDERS],
 	timeoutMs: 120_000,
 	attemptTimeoutMs: 45_000,
 	maxResponseBytes: DEFAULT_MAX_RESPONSE_BYTES,
@@ -145,7 +150,7 @@ const ALLOWED_INSTANCE_KEYS = new Set([
 ]);
 const ALLOWED_SEARCH_KEYS = new Set([
 	"providers",
-	"_providers",
+	"providers_fallback",
 	"limit",
 	"timeoutMs",
 	"attemptTimeoutMs",
@@ -153,7 +158,7 @@ const ALLOWED_SEARCH_KEYS = new Set([
 ]);
 const ALLOWED_EXTRACT_KEYS = new Set([
 	"providers",
-	"_providers",
+	"providers_fallback",
 	"timeoutMs",
 	"attemptTimeoutMs",
 	"maxResponseBytes",
@@ -362,26 +367,16 @@ function parseRoute(value: unknown, path: string): string[] | undefined {
 	return result;
 }
 
-function parseInternalRoute(value: unknown): string[] | undefined {
-	if (value === undefined) return undefined;
-	if (!Array.isArray(value)) return undefined;
-	const result: string[] = [];
-	for (const item of value) {
-		if (typeof item !== "string") return undefined;
-		const id = item.trim();
-		if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || id === "auto") return undefined;
-		result.push(id);
-	}
-	return result;
-}
-
 function parseSearch(value: unknown): Partial<SearchConfig> {
 	if (value === undefined) return {};
 	assertRecord(value, "search");
 	assertKnownKeys(value, ALLOWED_SEARCH_KEYS, "search");
 	return {
 		providers: parseRoute(value.providers, "search.providers"),
-		_providers: parseInternalRoute(value._providers),
+		providers_fallback: parseRoute(
+			value.providers_fallback,
+			"search.providers_fallback",
+		),
 		limit: parseLimit(value.limit),
 		timeoutMs: parsePositiveInt(
 			value.timeoutMs,
@@ -407,7 +402,10 @@ function parseExtract(value: unknown): Partial<ExtractConfig> {
 	assertKnownKeys(value, ALLOWED_EXTRACT_KEYS, "extract");
 	return {
 		providers: parseRoute(value.providers, "extract.providers"),
-		_providers: parseInternalRoute(value._providers),
+		providers_fallback: parseRoute(
+			value.providers_fallback,
+			"extract.providers_fallback",
+		),
 		timeoutMs: parsePositiveInt(
 			value.timeoutMs,
 			"extract.timeoutMs",
@@ -435,6 +433,8 @@ function parseRawConfig(value: unknown): {
 	instances: ProviderInstanceConfig[];
 	search: Partial<SearchConfig>;
 	extract: Partial<ExtractConfig>;
+	searchSpecified: boolean;
+	extractSpecified: boolean;
 } {
 	assertRecord(value, "config");
 	assertKnownKeys(
@@ -458,6 +458,8 @@ function parseRawConfig(value: unknown): {
 		instances,
 		search: parseSearch(value.search),
 		extract: parseExtract(value.extract),
+		searchSpecified: value.search !== undefined,
+		extractSpecified: value.extract !== undefined,
 	};
 }
 
@@ -485,16 +487,16 @@ function mergeInstances(
 
 function validateRoutes(
 	instances: ProviderInstanceConfig[],
-	route: string[] | undefined,
+	route: readonly string[] | undefined,
 	capability: Capability,
+	defaultRoute: readonly string[],
+	requireNonEmpty = false,
 ): string[] {
 	const allowed = capability === "search" ? SEARCH_TYPES : EXTRACT_TYPES;
 	const byId = new Map(instances.map((instance) => [instance.id, instance]));
-	const chosen =
-		route ??
-		(capability === "search"
-			? [...DEFAULT_SEARCH_PROVIDERS]
-			: [...DEFAULT_EXTRACT_PROVIDERS]);
+	const chosen = route ? [...route] : [...defaultRoute];
+	if (requireNonEmpty && chosen.length === 0)
+		throw new ConfigError(`${capability}.providers 不能为空`);
 	for (const id of chosen) {
 		const instance = byId.get(id);
 		if (!instance)
@@ -507,17 +509,6 @@ function validateRoutes(
 			);
 	}
 	return chosen;
-}
-
-function validInternalRoute(
-	configured: string[],
-	internal: string[] | undefined,
-): string[] | undefined {
-	if (!internal || internal.length !== configured.length) return undefined;
-	if (new Set(internal).size !== internal.length) return undefined;
-	const configuredIds = new Set(configured);
-	if (internal.some((id) => !configuredIds.has(id))) return undefined;
-	return internal;
 }
 
 export function getDefaultConfigPath(): string {
@@ -672,10 +663,12 @@ export function createDefaultAppConfig(): AppConfig {
 		search: {
 			...DEFAULT_SEARCH_CONFIG,
 			providers: [...DEFAULT_SEARCH_CONFIG.providers],
+			providers_fallback: [...DEFAULT_SEARCH_CONFIG.providers_fallback],
 		},
 		extract: {
 			...DEFAULT_EXTRACT_CONFIG,
 			providers: [...DEFAULT_EXTRACT_CONFIG.providers],
+			providers_fallback: [...DEFAULT_EXTRACT_CONFIG.providers_fallback],
 		},
 	};
 }
@@ -703,23 +696,32 @@ function buildLoadedConfig(
 		instanceConfigs,
 		raw.search.providers,
 		"search",
+		DEFAULT_SEARCH_PROVIDERS,
+		true,
+	);
+	const searchFallbackProviders = validateRoutes(
+		instanceConfigs,
+		raw.search.providers_fallback ??
+			(raw.searchSpecified ? [] : DEFAULT_SEARCH_FALLBACK_PROVIDERS),
+		"search",
+		DEFAULT_SEARCH_FALLBACK_PROVIDERS,
 	);
 	const extractProviders = validateRoutes(
 		instanceConfigs,
 		raw.extract.providers,
 		"extract",
+		DEFAULT_EXTRACT_PROVIDERS,
 	);
-	const searchInternalProviders = validInternalRoute(
-		searchProviders,
-		raw.search._providers,
-	);
-	const extractInternalProviders = validInternalRoute(
-		extractProviders,
-		raw.extract._providers,
+	const extractFallbackProviders = validateRoutes(
+		instanceConfigs,
+		raw.extract.providers_fallback ??
+			(raw.extractSpecified ? [] : DEFAULT_EXTRACT_FALLBACK_PROVIDERS),
+		"extract",
+		DEFAULT_EXTRACT_FALLBACK_PROVIDERS,
 	);
 	const search: SearchConfig = {
 		providers: searchProviders,
-		...(searchInternalProviders ? { _providers: searchInternalProviders } : {}),
+		providers_fallback: searchFallbackProviders,
 		limit: raw.search.limit ?? defaults.search.limit,
 		timeoutMs: raw.search.timeoutMs ?? defaults.search.timeoutMs,
 		attemptTimeoutMs:
@@ -729,9 +731,7 @@ function buildLoadedConfig(
 	};
 	const extract: ExtractConfig = {
 		providers: extractProviders,
-		...(extractInternalProviders
-			? { _providers: extractInternalProviders }
-			: {}),
+		providers_fallback: extractFallbackProviders,
 		timeoutMs: raw.extract.timeoutMs ?? defaults.extract.timeoutMs,
 		attemptTimeoutMs:
 			raw.extract.attemptTimeoutMs ?? defaults.extract.attemptTimeoutMs,
@@ -794,13 +794,24 @@ export function getRoute(config: AppConfig, capability: Capability): string[] {
 		: config.extract.providers;
 }
 
+export function getFallbackRoute(
+	config: AppConfig,
+	capability: Capability,
+): string[] {
+	const primary = getRoute(config, capability);
+	const fallback =
+		capability === "search"
+			? config.search.providers_fallback
+			: config.extract.providers_fallback;
+	const primaryIds = new Set(primary);
+	return fallback.filter((id) => !primaryIds.has(id));
+}
+
 export function getEffectiveRoute(
 	config: AppConfig,
 	capability: Capability,
 ): string[] {
-	const capabilityConfig =
-		capability === "search" ? config.search : config.extract;
-	return capabilityConfig._providers ?? capabilityConfig.providers;
+	return getRoute(config, capability);
 }
 
 export function getCapabilityConfig(

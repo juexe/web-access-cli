@@ -40,7 +40,7 @@ test("稳定分组将成功者置顶、未尝试者居中、失败者置尾", ()
 	]);
 });
 
-test("写回只更新对应 capability 的内部顺序", async (t) => {
+test("写回直接更新对应 capability 的公开顺序", async (t) => {
 	const directory = await temporaryDirectory(t);
 	const path = join(directory, "config.json");
 	const original = `{
@@ -62,23 +62,25 @@ test("写回只更新对应 capability 的内部顺序", async (t) => {
 
 	await persistProviderOrder(
 		loaded,
-		{
-			capability: "search",
-			configuredProviders: ["a", "b", "c"],
-			winner: "b",
-			failed: ["a"],
-		},
+		[
+			{
+				capability: "search",
+				route: "providers",
+				configuredProviders: ["a", "b", "c"],
+				winner: "b",
+				failed: ["a"],
+			},
+		],
 		{},
 	);
 
 	const contents = await readFile(path, "utf8");
 	const parsed = JSON.parse(contents) as {
-		search: { providers: string[]; _providers?: string[] };
-		extract: { providers: string[]; _providers?: string[] };
+		search: { providers: string[]; providers_fallback?: string[] };
+		extract: { providers: string[]; providers_fallback?: string[] };
 	};
-	assert.deepEqual(parsed.search.providers, ["a", "b", "c"]);
-	assert.deepEqual(parsed.search._providers, ["b", "c", "a"]);
-	assert.equal(parsed.extract._providers, undefined);
+	assert.deepEqual(parsed.search.providers, ["b", "c", "a"]);
+	assert.equal(parsed.extract.providers_fallback, undefined);
 });
 
 test("配置成员在请求期间变化时由用户 route 整组重置", async (t) => {
@@ -108,7 +110,6 @@ test("配置成员在请求期间变化时由用户 route 整组重置", async (
 			],
 			search: {
 				providers: ["a", "b", "c"],
-				_providers: ["b", "a", "c"],
 			},
 			extract: { providers: ["http"] },
 		}),
@@ -117,17 +118,20 @@ test("配置成员在请求期间变化时由用户 route 整组重置", async (
 
 	await persistProviderOrder(
 		loaded,
-		{
-			capability: "search",
-			configuredProviders: ["a", "b"],
-			winner: "b",
-			failed: ["a"],
-		},
+		[
+			{
+				capability: "search",
+				route: "providers",
+				configuredProviders: ["a", "b"],
+				winner: "b",
+				failed: ["a"],
+			},
+		],
 		{},
 	);
 
 	const parsed = JSON.parse(await readFile(path, "utf8"));
-	assert.deepEqual(parsed.search._providers, ["a", "b", "c"]);
+	assert.deepEqual(parsed.search.providers, ["a", "b", "c"]);
 });
 
 test("默认配置缺失时创建完整配置并写入内部顺序", async (t) => {
@@ -137,25 +141,26 @@ test("默认配置缺失时创建完整配置并写入内部顺序", async (t) =
 
 	await persistProviderOrder(
 		{ path, exists: false, app, instances: [] },
-		{
-			capability: "search",
-			configuredProviders: [...app.search.providers],
-			winner: "exa",
-			failed: ["tavily"],
-		},
+		[
+			{
+				capability: "search",
+				route: "providers",
+				configuredProviders: [...app.search.providers],
+				winner: "exa",
+				failed: ["tavily"],
+			},
+		],
 		{},
 	);
 
 	const parsed = JSON.parse(await readFile(path, "utf8"));
-	assert.deepEqual(parsed.search._providers, [
+	assert.deepEqual(parsed.search.providers, [
 		"exa",
 		"bocha",
 		"brave",
 		"searxng",
 		"anysearch",
 		"xcrawl",
-		"deepseek",
-		"xai_web_search",
 		"tavily",
 	]);
 	assert.equal(Array.isArray(parsed.providers), true);
@@ -188,18 +193,21 @@ test("已有配置符号链接写入目标且保留链接", {
 
 	await persistProviderOrder(
 		loaded,
-		{
-			capability: "search",
-			configuredProviders: ["a", "b"],
-			winner: "b",
-			failed: ["a"],
-		},
+		[
+			{
+				capability: "search",
+				route: "providers",
+				configuredProviders: ["a", "b"],
+				winner: "b",
+				failed: ["a"],
+			},
+		],
 		{},
 	);
 
 	assert.equal((await lstat(link)).isSymbolicLink(), true);
 	assert.deepEqual(
-		JSON.parse(await readFile(target, "utf8")).search._providers,
+		JSON.parse(await readFile(target, "utf8")).search.providers,
 		["b", "a"],
 	);
 });

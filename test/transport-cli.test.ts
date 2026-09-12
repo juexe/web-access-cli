@@ -396,7 +396,7 @@ test("CLI 将成功 provider 写到队头并在下一进程优先使用", async 
 	assert.equal(first.status, 0);
 	assert.equal(first.stderr, "");
 	assert.equal(JSON.parse(first.stdout).provider, "search_b");
-	assert.deepEqual(JSON.parse(readFileSync(path, "utf8")).search._providers, [
+	assert.deepEqual(JSON.parse(readFileSync(path, "utf8")).search.providers, [
 		"search_b",
 		"search_a",
 	]);
@@ -495,6 +495,21 @@ test("CLI extract AnySearch 只输出 data.content 中的 Markdown", async (t) =
 });
 
 test("CLI 输入错误保持单 JSON、空 stderr 与退出码契约", async (t) => {
+	const directory = mkdtempSync(join(tmpdir(), "web-access-cli-input-"));
+	t.after(() => rmSync(directory, { recursive: true, force: true }));
+	const configPath = join(directory, "config.json");
+	writeFileSync(
+		configPath,
+		JSON.stringify({
+			providers: [
+				{ id: "tavily", type: "tavily" },
+				{ id: "http", type: "http" },
+			],
+			search: { providers: ["tavily"] },
+			extract: { providers: ["http"] },
+		}),
+		"utf8",
+	);
 	const cases = [
 		{
 			name: "应用校验错误不受 JSON 选项污染",
@@ -528,7 +543,7 @@ test("CLI 输入错误保持单 JSON、空 stderr 与退出码契约", async (t)
 				{
 					cwd: resolve("."),
 					encoding: "utf8",
-					env: { ...process.env, WEB_ACCESS_CONFIG: "" },
+					env: { ...process.env, WEB_ACCESS_CONFIG: configPath },
 				},
 			);
 			assert.equal(result.status, 2);
@@ -582,6 +597,60 @@ test("CLI 注册 config edit 并向实现转发全局配置路径", async () => 
 		envelope && "command" in envelope ? envelope.command : undefined,
 		"config.edit",
 	);
+});
+
+test("CLI 注册 config init、转发路径并区分默认路径输出和 JSON", async () => {
+	const tasks: Array<() => Promise<OutputEnvelope> | OutputEnvelope> = [];
+	const modes: string[] = [];
+	let explicitPath: string | undefined;
+	const program = createProgram(
+		(task, mode) => {
+			tasks.push(task);
+			modes.push(mode ?? "json");
+		},
+		{
+			executeConfigInit: async (options) => {
+				explicitPath = options?.explicitPath;
+				return {
+					schemaVersion: 2,
+					ok: true,
+					command: "config.init",
+					durationMs: 0,
+					data: {
+						path: resolve("chosen-config.json"),
+						created: true,
+						searchProviders: ["tavily"],
+						searchFallbackProviders: [],
+						extractProviders: ["firecrawl"],
+						extractFallbackProviders: ["http"],
+					},
+				};
+			},
+		},
+	);
+
+	await program.parseAsync([
+		"node",
+		"web-access",
+		"--config",
+		"./chosen-config.json",
+		"config",
+		"init",
+	]);
+	await program.parseAsync([
+		"node",
+		"web-access",
+		"--config",
+		"./chosen-config.json",
+		"config",
+		"init",
+		"--json",
+	]);
+	assert.equal(tasks.length, 2);
+	assert.deepEqual(modes, ["path", "json"]);
+	await tasks[0]?.();
+	await tasks[1]?.();
+	assert.equal(explicitPath, "./chosen-config.json");
 });
 
 test("CLI config edit 的路径错误保持单 JSON 与退出码契约", () => {

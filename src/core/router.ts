@@ -1,7 +1,7 @@
 import type { LoadedConfig } from "../config/config.ts";
 import {
 	capabilitySupports,
-	getEffectiveRoute,
+	getFallbackRoute,
 	getRoute,
 } from "../config/config.ts";
 import { ref } from "../providers/common.ts";
@@ -44,7 +44,7 @@ interface RunResult<T> {
 	provider: ProviderInstance;
 	execution: ProviderExecution<T>;
 	attempts: ProviderAttempt[];
-	orderUpdate?: ProviderOrderUpdate;
+	orderUpdates?: ProviderOrderUpdate[];
 }
 
 interface RunFailure {
@@ -52,7 +52,7 @@ interface RunFailure {
 	attempts: ProviderAttempt[];
 	raw?: unknown;
 	partial?: { provider: ProviderInstance; data: ExtractData; raw: unknown };
-	orderUpdate?: ProviderOrderUpdate;
+	orderUpdates?: ProviderOrderUpdate[];
 }
 
 function elapsed(start: number, now: () => number): number {
@@ -128,11 +128,14 @@ function resolveInstances(
 	capability: Capability,
 	selected: string,
 ): {
-	instances: ProviderInstance[];
+	primary: ProviderInstance[];
+	fallback: ProviderInstance[];
 	automatic: boolean;
 	configuredProviders: string[];
+	configuredFallbackProviders: string[];
 } {
 	const route = getRoute(loaded.app, capability);
+	const fallbackRoute = getFallbackRoute(loaded.app, capability);
 	const byId = new Map(
 		loaded.instances.map((instance) => [instance.id, instance]),
 	);
@@ -149,24 +152,30 @@ function resolveInstances(
 				`${selected} 不支持 ${capability}`,
 				{ provider: ref(instance) },
 			);
-		if (!route.includes(selected))
+		if (!route.includes(selected) && !fallbackRoute.includes(selected))
 			throw new WebAccessError(
 				"provider_disabled",
-				`${selected} 未在 ${capability}.providers route 中启用`,
+				`${selected} 未在 ${capability}.providers 或 providers_fallback route 中启用`,
 				{ provider: ref(instance) },
 			);
 		return {
-			instances: [instance],
+			primary: [instance],
+			fallback: [],
 			automatic: false,
 			configuredProviders: route,
+			configuredFallbackProviders: fallbackRoute,
 		};
 	}
 	return {
-		instances: getEffectiveRoute(loaded.app, capability)
+		primary: route
+			.map((id) => byId.get(id))
+			.filter((instance): instance is ProviderInstance => !!instance),
+		fallback: fallbackRoute
 			.map((id) => byId.get(id))
 			.filter((instance): instance is ProviderInstance => !!instance),
 		automatic: true,
 		configuredProviders: route,
+		configuredFallbackProviders: fallbackRoute,
 	};
 }
 
@@ -231,9 +240,11 @@ async function runProviders<T>(options: {
 	const started = now();
 	const transport = options.context.transport ?? new DefaultHttpTransport();
 	let resolved: {
-		instances: ProviderInstance[];
+		primary: ProviderInstance[];
+		fallback: ProviderInstance[];
 		automatic: boolean;
 		configuredProviders: string[];
+		configuredFallbackProviders: string[];
 	};
 	try {
 		resolved = resolveInstances(
@@ -245,110 +256,202 @@ async function runProviders<T>(options: {
 		return { error: asWebAccessError(error), attempts: [] };
 	}
 	const attempts: ProviderAttempt[] = [];
-	const failedForOrdering: string[] = [];
 	let lastError: WebAccessError | undefined;
 	let lastRaw: unknown;
 	let partial: RunFailure["partial"];
-
-	for (const instance of resolved.instances) {
-		const remaining = options.totalTimeoutMs - elapsed(started, now);
-		if (remaining <= 0) {
-			lastError = timeoutError(instance);
-			break;
-		}
-		const adapter = getAdapter(instance.type, options.capability);
-		const attemptStarted = now();
-		if (!adapter?.isConfigured(instance)) {
-			const error = unavailableError(instance, options.capability);
-			attempts.push({
-				provider: ref(instance),
-				status: "failed",
-				durationMs: elapsed(attemptStarted, now),
-				error: error.toInfo(),
-			});
-			lastError = error;
-			if (resolved.automatic) {
-				failedForOrdering.push(instance.id);
-				continue;
+	const runRound = async (
+		instances: ProviderInstance[],
+		configuredProviders: string[],
+		route: ProviderOrderUpdate["route"],
+	): Promise<{
+		success?: { provider: ProviderInstance; execution: ProviderExecution<T> };
+		exhausted: boolean;
+		eligible: boolean;
+		orderUpdate?: ProviderOrderUpdate;
+	}> => {
+		const failedForOrdering: string[] = [];
+		let roundError: WebAccessError | undefined;
+		for (const instance of instances) {
+			const remaining = options.totalTimeoutMs - elapsed(started, now);
+			if (remaining <= 0) {
+				roundError = timeoutError(instance);
+				lastError = roundError;
+				break;
 			}
-			break;
-		}
-
-		const attemptSignal = AbortSignal.any([
-			...(options.context.signal ? [options.context.signal] : []),
-			AbortSignal.timeout(
-				Math.max(1, Math.min(remaining, options.attemptTimeoutMs)),
-			),
-		]);
-		try {
-			const execution = await options.invoke(
-				instance,
-				attemptSignal,
-				transport,
-			);
-			const qualityError = options.validate?.(execution, instance);
-			if (qualityError) {
-				lastError = qualityError;
-				lastRaw = execution.raw;
-				const candidate = execution.data as ExtractData;
-				if (
-					!partial ||
-					candidate.document.content.length >
-						partial.data.document.content.length
-				) {
-					partial = {
-						provider: instance,
-						data: candidate,
-						raw: execution.raw,
-					};
-				}
+			const adapter = getAdapter(instance.type, options.capability);
+			const attemptStarted = now();
+			if (!adapter?.isConfigured(instance)) {
+				const error = unavailableError(instance, options.capability);
 				attempts.push({
 					provider: ref(instance),
 					status: "failed",
 					durationMs: elapsed(attemptStarted, now),
-					error: qualityError.toInfo(),
+					error: error.toInfo(),
 				});
-				if (!resolved.automatic || !isFallbackEligible(qualityError)) break;
+				roundError = error;
+				lastError = error;
+				if (!resolved.automatic) return { exhausted: false, eligible: false };
 				failedForOrdering.push(instance.id);
 				continue;
 			}
-			attempts.push({
-				provider: ref(instance),
-				status: "success",
-				durationMs: elapsed(attemptStarted, now),
-			});
-			return {
-				provider: instance,
-				execution,
-				attempts,
-				...(resolved.automatic
-					? {
-							orderUpdate: {
-								capability: options.capability,
-								configuredProviders: [...resolved.configuredProviders],
-								winner: instance.id,
-								failed: failedForOrdering,
-							},
-						}
-					: {}),
-			};
-		} catch (caught) {
-			const error = normalizeAbort(
-				asWebAccessError(caught, "provider_error"),
-				options.context.signal,
-				instance,
-			);
-			lastError = error;
-			lastRaw = error.raw;
-			attempts.push({
-				provider: ref(instance),
-				status: "failed",
-				durationMs: elapsed(attemptStarted, now),
-				error: error.toInfo(),
-			});
-			if (!resolved.automatic || !isFallbackEligible(error)) break;
-			failedForOrdering.push(instance.id);
+
+			const attemptSignal = AbortSignal.any([
+				...(options.context.signal ? [options.context.signal] : []),
+				AbortSignal.timeout(
+					Math.max(1, Math.min(remaining, options.attemptTimeoutMs)),
+				),
+			]);
+			try {
+				const execution = await options.invoke(
+					instance,
+					attemptSignal,
+					transport,
+				);
+				const qualityError = options.validate?.(execution, instance);
+				if (qualityError) {
+					roundError = qualityError;
+					lastError = qualityError;
+					lastRaw = execution.raw;
+					const candidate = execution.data as ExtractData;
+					if (
+						!partial ||
+						candidate.document.content.length >
+							partial.data.document.content.length
+					) {
+						partial = {
+							provider: instance,
+							data: candidate,
+							raw: execution.raw,
+						};
+					}
+					attempts.push({
+						provider: ref(instance),
+						status: "failed",
+						durationMs: elapsed(attemptStarted, now),
+						error: qualityError.toInfo(),
+					});
+					if (!resolved.automatic || !isFallbackEligible(qualityError))
+						return {
+							exhausted: false,
+							eligible: false,
+							...(failedForOrdering.length > 0
+								? {
+										orderUpdate: {
+											capability: options.capability,
+											route,
+											configuredProviders: [...configuredProviders],
+											failed: failedForOrdering,
+										},
+									}
+								: {}),
+						};
+					failedForOrdering.push(instance.id);
+					continue;
+				}
+				attempts.push({
+					provider: ref(instance),
+					status: "success",
+					durationMs: elapsed(attemptStarted, now),
+				});
+				return {
+					success: { provider: instance, execution },
+					exhausted: false,
+					eligible: false,
+					...(resolved.automatic
+						? {
+								orderUpdate: {
+									capability: options.capability,
+									route,
+									configuredProviders: [...configuredProviders],
+									winner: instance.id,
+									failed: failedForOrdering,
+								},
+							}
+						: {}),
+				};
+			} catch (caught) {
+				const error = normalizeAbort(
+					asWebAccessError(caught, "provider_error"),
+					options.context.signal,
+					instance,
+				);
+				roundError = error;
+				lastError = error;
+				lastRaw = error.raw;
+				attempts.push({
+					provider: ref(instance),
+					status: "failed",
+					durationMs: elapsed(attemptStarted, now),
+					error: error.toInfo(),
+				});
+				if (!resolved.automatic || !isFallbackEligible(error))
+					return {
+						exhausted: false,
+						eligible: false,
+						...(failedForOrdering.length > 0
+							? {
+									orderUpdate: {
+										capability: options.capability,
+										route,
+										configuredProviders: [...configuredProviders],
+										failed: failedForOrdering,
+									},
+								}
+							: {}),
+					};
+				failedForOrdering.push(instance.id);
+			}
 		}
+		return {
+			exhausted: true,
+			eligible:
+				resolved.automatic && (!roundError || isFallbackEligible(roundError)),
+			...(resolved.automatic && failedForOrdering.length > 0
+				? {
+						orderUpdate: {
+							capability: options.capability,
+							route,
+							configuredProviders: [...configuredProviders],
+							failed: failedForOrdering,
+						},
+					}
+				: {}),
+		};
+	};
+
+	const orderUpdates: ProviderOrderUpdate[] = [];
+	const primary = await runRound(
+		resolved.primary,
+		resolved.configuredProviders,
+		"providers",
+	);
+	if (primary.orderUpdate) orderUpdates.push(primary.orderUpdate);
+	if (primary.success)
+		return {
+			...primary.success,
+			attempts,
+			...(orderUpdates.length > 0 ? { orderUpdates } : {}),
+		};
+
+	if (
+		resolved.automatic &&
+		primary.exhausted &&
+		primary.eligible &&
+		resolved.fallback.length > 0 &&
+		options.totalTimeoutMs - elapsed(started, now) > 0
+	) {
+		const fallback = await runRound(
+			resolved.fallback,
+			resolved.configuredFallbackProviders,
+			"providers_fallback",
+		);
+		if (fallback.orderUpdate) orderUpdates.push(fallback.orderUpdate);
+		if (fallback.success)
+			return {
+				...fallback.success,
+				attempts,
+				...(orderUpdates.length > 0 ? { orderUpdates } : {}),
+			};
 	}
 
 	if (!lastError)
@@ -376,28 +479,25 @@ async function runProviders<T>(options: {
 		attempts,
 		raw: lastRaw,
 		...(partial ? { partial } : {}),
-		...(resolved.automatic &&
-		failedForOrdering.length > 0 &&
-		!options.context.signal?.aborted
-			? {
-					orderUpdate: {
-						capability: options.capability,
-						configuredProviders: [...resolved.configuredProviders],
-						failed: failedForOrdering,
-					},
-				}
+		...(orderUpdates.length > 0 && !options.context.signal?.aborted
+			? { orderUpdates }
 			: {}),
 	};
 }
 
 async function persistOrderUpdate(
 	context: ExecutionContext,
-	update: ProviderOrderUpdate | undefined,
+	updates: ProviderOrderUpdate[] | undefined,
 ): Promise<CapabilityWarning[] | undefined> {
-	if (!update || !context.persistProviderOrder || context.signal?.aborted)
+	if (
+		!updates ||
+		updates.length === 0 ||
+		!context.persistProviderOrder ||
+		context.signal?.aborted
+	)
 		return undefined;
 	try {
-		await context.persistProviderOrder(update);
+		await context.persistProviderOrder(updates);
 		return undefined;
 	} catch {
 		return [
@@ -486,7 +586,7 @@ export async function executeSearch(
 			});
 		},
 	});
-	const warnings = await persistOrderUpdate(context, result.orderUpdate);
+	const warnings = await persistOrderUpdate(context, result.orderUpdates);
 	if ("error" in result)
 		return failureEnvelope(
 			request,
@@ -559,7 +659,7 @@ export async function executeExtract(
 			);
 		},
 	});
-	const warnings = await persistOrderUpdate(context, result.orderUpdate);
+	const warnings = await persistOrderUpdate(context, result.orderUpdates);
 	if ("error" in result)
 		return failureEnvelope(
 			request,

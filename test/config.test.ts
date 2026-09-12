@@ -387,10 +387,9 @@ test("providers 省略或为空时合并全部内置 instance，自定义 id 只
 	}
 });
 
-test("缺省 route 覆盖全部支持能力的内置 provider，显式空 route 保持禁用", () => {
+test("缺省 route 按主轮与 fallback 分组，Search 主轮不能为空", () => {
 	const defaults = configFile({});
 	const disabled = configFile({
-		search: { providers: [] },
 		extract: { providers: [] },
 	});
 	try {
@@ -409,25 +408,35 @@ test("缺省 route 覆盖全部支持能力的内置 provider，显式空 route 
 				{ search: true, extract: true },
 			);
 		}
-		assert.deepEqual(loaded.app.search.providers.at(-1), "xai_web_search");
-		assert.equal(loaded.app.search.providers.includes("xai_x_search"), false);
-		for (const capability of ["search", "extract"] as const) {
-			const route =
-				capability === "search"
-					? loaded.app.search.providers
-					: loaded.app.extract.providers;
-			const supported = loaded.instances
-				.filter(
-					(instance) =>
-						capabilitySupports(instance.type, capability) &&
-						instance.id !== "xai_x_search",
-				)
-				.map((instance) => instance.id);
-			assert.equal(new Set(route).size, route.length);
-			assert.deepEqual([...route].sort(), supported.sort());
+		assert.deepEqual(loaded.app.search.providers, [
+			"tavily",
+			"exa",
+			"bocha",
+			"brave",
+			"searxng",
+			"anysearch",
+			"xcrawl",
+		]);
+		assert.deepEqual(loaded.app.search.providers_fallback, [
+			"deepseek",
+			"xai_x_search",
+			"xai_web_search",
+		]);
+		assert.deepEqual(loaded.app.extract.providers, [
+			"firecrawl",
+			"jina",
+			"exa",
+			"anysearch",
+			"xcrawl",
+		]);
+		assert.deepEqual(loaded.app.extract.providers_fallback, ["http"]);
+		const emptySearch = configFile({ search: { providers: [] } });
+		try {
+			assert.throws(() => loadConfig(emptySearch.path, {}), isConfigError);
+		} finally {
+			emptySearch.cleanup();
 		}
 		const emptyRoutes = loadConfig(disabled.path, {});
-		assert.deepEqual(emptyRoutes.app.search.providers, []);
 		assert.deepEqual(emptyRoutes.app.extract.providers, []);
 	} finally {
 		defaults.cleanup();
@@ -451,64 +460,48 @@ test("只读取显式或用户级配置路径", () => {
 	assert.equal(resolveConfigPath(undefined, {}), getDefaultConfigPath());
 });
 
-test("内部 provider 顺序与用户 route 分离并用于诊断", () => {
+test("公开 provider route 顺序直接用于诊断", () => {
 	const fixture = configFile({
 		providers: [
 			{ id: "search_a", type: "searxng", baseUrl: "https://a.test" },
 			{ id: "search_b", type: "searxng", baseUrl: "https://b.test" },
 		],
 		search: {
-			providers: ["search_a", "search_b"],
-			_providers: ["search_b", "search_a"],
+			providers: ["search_b", "search_a"],
+			providers_fallback: [],
 		},
-		extract: { providers: ["http"], _providers: ["http"] },
+		extract: { providers: ["http"], providers_fallback: [] },
 	});
 	try {
 		const loaded = loadConfig(fixture.path, {});
-		assert.deepEqual(loaded.app.search.providers, ["search_a", "search_b"]);
+		assert.deepEqual(loaded.app.search.providers, ["search_b", "search_a"]);
 		assert.deepEqual(getEffectiveRoute(loaded.app, "search"), [
 			"search_b",
 			"search_a",
 		]);
 		const data = executeProviders(loaded).data as {
 			searchRoute: string[];
+			searchFallbackRoute: string[];
 			extractRoute: string[];
+			extractFallbackRoute: string[];
 		};
 		assert.deepEqual(data.searchRoute, ["search_b", "search_a"]);
+		assert.deepEqual(data.searchFallbackRoute, []);
 		assert.deepEqual(data.extractRoute, ["http"]);
+		assert.deepEqual(data.extractFallbackRoute, []);
 	} finally {
 		fixture.cleanup();
 	}
 });
 
-test("无效或失配的内部 provider 顺序整组重置", () => {
-	const invalidValues = [
-		["search_a", "search_a"],
-		["search_a", "ghost"],
-		["search_a"],
-		"search_a",
-	];
-	for (const internal of invalidValues) {
-		const fixture = configFile({
-			providers: [
-				{ id: "search_a", type: "searxng", baseUrl: "https://a.test" },
-				{ id: "search_b", type: "searxng", baseUrl: "https://b.test" },
-			],
-			search: {
-				providers: ["search_a", "search_b"],
-				_providers: internal,
-			},
-			extract: { providers: ["http"] },
-		});
-		try {
-			const loaded = loadConfig(fixture.path, {});
-			assert.deepEqual(getEffectiveRoute(loaded.app, "search"), [
-				"search_a",
-				"search_b",
-			]);
-			assert.equal(loaded.app.search._providers, undefined);
-		} finally {
-			fixture.cleanup();
-		}
+test("旧下划线顺序字段直接报配置错误", () => {
+	const fixture = configFile({
+		search: { _providers: ["tavily"] },
+		extract: { providers: ["http"] },
+	});
+	try {
+		assert.throws(() => loadConfig(fixture.path, {}), isConfigError);
+	} finally {
+		fixture.cleanup();
 	}
 });

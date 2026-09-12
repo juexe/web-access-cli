@@ -13,7 +13,7 @@
 
 响应映射 `data.webPages.value` 到统一 SearchHit，非空 `summary` 优先于 `snippet`。顶层 `code` 缺失或为数值 200 时视为成功；非法 code、缺失或错误类型的 `data` 字段返回可恢复的 `invalid_response`，缺少 `webPages/value` 的合法 data 视为空结果。业务码和 HTTP 状态按稳定错误码分类；HTTP 403 为不可重试的 `quota_exceeded`，但由于存在最终非 2xx 状态，`auto` 仍会切换到下一个 Provider。错误消息和 raw 仅保留脱敏后的上游信息。
 
-博查加入默认 Search Route 的 Exa 之后、Brave 之前。省略 Route 的配置和新生成的默认配置使用该顺序；已有显式 Route 以及 `_providers` 不自动插入博查，不引入迁移层。该 Provider 仅支持 Search，不扩展 Extract 或公共字段。
+博查加入默认 Search 主 Route 的 Exa 之后、Brave 之前。省略 Route 的配置和新生成的默认配置使用该顺序；已有显式 Route 不自动插入博查，不引入迁移层。该 Provider 仅支持 Search，不扩展 Extract 或公共字段。
 
 ## 结果
 

@@ -16,7 +16,7 @@ CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCo
 | `search` | Tavily、Exa、Bocha、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、xAI x_search、xAI web_search | `rank`、`title`、`url`、`snippet` |
 | `extract` | Firecrawl v2、Jina Reader、Exa Contents、AnySearch、XCrawl、HTTP | Markdown `Document` |
 
-Provider Type 描述实现类型；Provider Instance 是一份可配置实例。一个 Type 可以有多个 Instance，例如 `exa_team` 和 `exa_personal`。`providers` Route 是有序 Instance ID 数组，决定启用状态和 `auto` 的初始顺序；CLI 会把学习后的实际顺序保存在同级 `_providers`。
+Provider Type 描述实现类型；Provider Instance 是一份可配置实例。一个 Type 可以有多个 Instance，例如 `exa_team` 和 `exa_personal`。每个能力都有主 `providers` Route 和兜底 `providers_fallback` Route；两组数组同时决定启用状态和 `auto` 顺序，CLI 只在原分组内部调整成员顺序。
 
 ## 安装
 
@@ -89,9 +89,11 @@ web-access doctor
 
 web-access config edit
 web-access --config "/path/to/config.json" config edit
+web-access config init
+web-access --config "/path/to/config.json" config init --json
 ```
 
-CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两个诊断命令，以及 `config edit` 配置维护命令。当前版本不提供 batch/all、answer、PDF 专线、Node SDK 或通用 MCP 集成。仓库提供可选的 [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md)，仅供源码仓库使用，不包含在 npm 发布包中。
+CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两个诊断命令，以及 `config init`、`config edit` 配置维护命令。当前版本不提供 batch/all、answer、PDF 专线、Node SDK 或通用 MCP 集成。仓库提供可选的 [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md)，仅供源码仓库使用，不包含在 npm 发布包中。
 
 ### 通用选项
 
@@ -99,7 +101,7 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 - `--json`：输出紧凑 schema v2 JSON envelope；不指定时，成功命令输出面向人的 Markdown，失败始终输出 JSON。
 - `--help`、`--version`：输出常规 CLI 帮助或版本文本。
 
-成功命令默认输出面向人的 Markdown。`search` 输出 YAML front matter 和编号结果列表；`extract` 输出 YAML front matter 和规范化后的 Markdown 正文；`providers`、`doctor` 和 `config edit` 输出标题和格式化 JSON 数据。需要 schema v2 envelope 时显式追加 `--json`。提取失败（包括 `partial`）以及所有失败路径始终输出 JSON envelope。诊断信息不会混入 stdout。
+成功命令默认输出面向人的 Markdown。`search` 输出 YAML front matter 和编号结果列表；`extract` 输出 YAML front matter 和规范化后的 Markdown 正文；`providers`、`doctor` 和 `config edit` 输出标题和格式化 JSON 数据；`config init` 输出新配置的绝对路径。需要 schema v2 envelope 时显式追加 `--json`。提取失败（包括 `partial`）以及所有失败路径始终输出 JSON envelope。诊断信息不会混入 stdout。
 
 ## 配置
 
@@ -109,7 +111,7 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 
 `web-access config edit` 会在配置文件缺失时创建父目录和完整默认配置，再优先使用 `VISUAL`、其次使用 `EDITOR` 打开；变量值可以包含带引号的可执行文件路径和参数，解析时不会执行 shell，并将配置路径作为独立的最后一个参数传入。已有文件会原样打开，即使内容暂时不是有效 JSON 也不会被覆盖或格式化。命令只等待编辑器进程启动，不等待编辑器关闭。两个变量都未设置、格式无效或启动失败时返回 `open_failed`；如果配置刚刚创建成功，文件仍会保留以便手动编辑。
 
-`config edit` 本身不会改写已有内容；能力命令使用 `auto` 成功或发生可回退失败后，会原子更新 `search._providers` 或 `extract._providers`。默认配置尚不存在时，首次产生学习结果的 `auto` 调用会创建完整默认配置。`_providers` 由 CLI 管理，不会启用 `providers` 之外的 Instance；其内容缺失、格式错误、重复、引用未知 ID 或与 `providers` 成员集合不一致时会整组重置。删除 `_providers` 可以手动恢复用户声明的初始顺序。
+`config init` 按标准凭据环境变量创建新配置，已存在文件时拒绝覆盖。它保留全部内置 Instance 定义，将检测到的 Search provider 写入主 Route，Search fallback 留空，将检测到的远程 Extract provider 写入主 Route，并把 `http` 放入 Extract fallback。能力命令使用 `auto` 成功或发生可回退失败后，会原子重排对应的 `providers` 或 `providers_fallback` 数组；成员不会跨组移动。旧的 `_providers` 和 `_providers_fallback` 字段会被严格配置校验拒绝。
 
 完整 JSON Schema 位于 [schemas/config.schema.json](schemas/config.schema.json)。示例：
 
@@ -138,13 +140,15 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
   ],
   "search": {
     "providers": ["searx_local", "exa_team", "brave"],
+    "providers_fallback": ["deepseek"],
     "limit": 5,
     "timeoutMs": 120000,
     "attemptTimeoutMs": 60000,
     "maxResponseBytes": 5242880
   },
   "extract": {
-    "providers": ["firecrawl_local", "jina", "exa_team", "http"],
+    "providers": ["firecrawl_local", "jina", "exa_team"],
+    "providers_fallback": ["http"],
     "timeoutMs": 120000,
     "attemptTimeoutMs": 45000,
     "maxResponseBytes": 5242880,
@@ -153,16 +157,18 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 }
 ```
 
-内置 Instance 为 `tavily`、`exa`、`bocha`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`、`xcrawl`、`deepseek`、`xai_x_search`、`xai_web_search`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。只有出现在对应 `providers` Route 中的实例才启用。Bocha 默认 base URL 为 `https://api.bocha.cn`，必须配置 API key；AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用；XCrawl 默认 base URL 为 `https://run.xcrawl.com`，必须配置 API key；DeepSeek 默认 base URL 为 `https://api.deepseek.com/anthropic/v1`，必须配置 API key。
+内置 Instance 为 `tavily`、`exa`、`bocha`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`、`xcrawl`、`deepseek`、`xai_x_search`、`xai_web_search`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。出现在对应主 Route 或 fallback Route 中的实例才启用。Bocha 默认 base URL 为 `https://api.bocha.cn`，必须配置 API key；AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用；XCrawl 默认 base URL 为 `https://run.xcrawl.com`，必须配置 API key；DeepSeek 默认 base URL 为 `https://api.deepseek.com/anthropic/v1`，必须配置 API key。
 
 默认 Route：
 
-- Search：`tavily -> exa -> bocha -> brave -> searxng -> anysearch -> xcrawl -> deepseek -> xai_web_search`
-- Extract：`firecrawl -> jina -> exa -> anysearch -> xcrawl -> http`
+- Search 主轮：`tavily -> exa -> bocha -> brave -> searxng -> anysearch -> xcrawl`
+- Search fallback：`deepseek -> xai_x_search -> xai_web_search`
+- Extract 主轮：`firecrawl -> jina -> exa -> anysearch -> xcrawl`
+- Extract fallback：`http`
 
-默认 Route 包含支持对应 Capability 的全部内置 Instance。自定义 ID 会合并到 Instance 列表，但仍需显式加入 Route；省略 Route 时使用上述默认值，显式空数组则禁用对应能力。`auto` 会跳过未完成配置的 Instance；AnySearch 使用默认 base URL 时可匿名调用，XCrawl 和 DeepSeek 则在配置 API key 前被跳过。AnySearch 与 XCrawl 可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
+默认 Route 将内置 provider 分为主轮和 fallback。自定义 ID 会合并到 Instance 列表，但仍需显式加入 Route；省略能力 Route 时使用上述默认分组，Search 主 Route 显式空数组会报错，Extract 主 Route 可以显式为空以禁用 Extract。`auto` 会跳过未完成配置的 Instance。AnySearch 与 XCrawl 可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
 
-DeepSeek Search 通过 Anthropic-compatible Messages API 调用原生 `web_search_20250305` server tool，一次搜索是完整模型轮次，因此延迟和成本可能高于专用搜索 endpoint。它位于默认 Route 末尾，仅在前序 Provider 未配置、返回最终非 2xx HTTP 响应或发生其他可恢复失败后触发。Adapter 只接受 `web_search_tool_result` 中的结构化 URL，按 URL 合并 citation 摘要，绝不从模型 prose 中猜测 URL。域名条件会改写查询并在本地再次严格过滤；DeepSeek 不支持 `freshness`，遇到该参数时以可恢复错误跳过；重定向会被严格拒绝，且不会访问 `Location` 目标。Provider 私有的 `encrypted_content` 是 CLI 无法展示或解码的 opaque payload，不具备诊断价值，因此会从 `raw` 中移除。
+DeepSeek Search 通过 Anthropic-compatible Messages API 调用原生 `web_search_20250305` server tool，一次搜索是完整模型轮次，因此延迟和成本可能高于专用搜索 endpoint。它位于默认 Search fallback，仅在全部主轮 Provider 未配置、返回最终非 2xx HTTP 响应或发生其他可恢复失败后触发。Adapter 只接受 `web_search_tool_result` 中的结构化 URL，按 URL 合并 citation 摘要，绝不从模型 prose 中猜测 URL。域名条件会改写查询并在本地再次严格过滤；DeepSeek 不支持 `freshness`，遇到该参数时以可恢复错误跳过；重定向会被严格拒绝，且不会访问 `Location` 目标。Provider 私有的 `encrypted_content` 是 CLI 无法展示或解码的 opaque payload，不具备诊断价值，因此会从 `raw` 中移除。
 
 XAI hosted Search 使用 `XAI_AUTH_JSON` 指向外部 OAuth JSON 文件，每次调用只读取 `access_token`，由外部 CLIProxyAPI 负责刷新和回写。可用 `authJson`/`authJsonEnv` 与 `model`/`modelEnv` 为实例覆盖路径和模型。`xai_web_search` 支持最多 5 个 allow 或 exclude 域名（两者不能同时使用）；`xai_x_search` 不接受 `freshness`。模型搜索可能需要更长时间；Search 默认单次超时 60 秒、总超时 120 秒。
 
@@ -189,15 +195,15 @@ XAI hosted Search 使用 `XAI_AUTH_JSON` 指向外部 OAuth JSON 文件，每次
 
 ## 执行与回退
 
-`--provider auto` 按 `_providers` 的有效顺序执行；字段不存在或无效时从 `providers` 开始：
+`--provider auto` 先按 `providers` 顺序执行；只有主轮全部失败且结果可回退时才进入 `providers_fallback`：
 
 1. 未完成配置的实例会记录为失败 attempt 并跳过。
 2. Provider 返回的最终 HTTP 响应不在 2xx 范围时，包括鉴权、请求、限流和服务器错误，Router 会尝试下一个实例。
 3. 网络错误、超时、响应过大、无可用正文等其他可恢复错误也会继续 Route。
 4. 没有最终非 2xx 响应的不可恢复错误，例如无效输入或在成功响应中检测到不支持的内容，会立即停止。
-5. 所有实例失败时返回 `provider_exhausted`。提取过程中产生的最佳短正文会保留在 `partial`。
+5. 两组实例全部失败时返回 `provider_exhausted`。提取过程中产生的最佳短正文会保留在 `partial`。
 
-每次 `auto` 调用完成后，成功 Instance 移到队头，未尝试 Instance 保持在中间，发生上述可回退失败的 Instance 稳定移到队尾；三组内部顺序不变。所有 Instance 都失败时顺序不变。Search 与 Extract 独立学习；显式 Instance、不可回退错误和用户取消不会更新顺序。写入采用原子替换，并发进程由最后写入者生效。
+每次 `auto` 调用完成后，成功 Instance 移到所在组队头，未尝试 Instance 保持在中间，发生上述可回退失败的 Instance 稳定移到所在组队尾；顺序学习不会跨组移动 provider。所有 Instance 都失败时顺序不变。Search 与 Extract 独立学习；显式 Instance、不可回退错误和用户取消不会更新顺序。写入采用原子替换，并发进程由最后写入者生效。
 
 Attempt 会保留 Provider 的原始错误码、HTTP status 和 `retryable` 值。`retryable` 表示原始操作是否适合对同一 Provider 重试，不再是自动 Route 切换到下一 Provider 的唯一条件。
 
@@ -252,7 +258,7 @@ title: "Example title"
 - `1`：运行时/provider/doctor/编辑器启动失败
 - `130`：用户取消
 
-`providers` 会列出每个 Instance 的 Type、能力、Route 启用状态、凭据来源和 base URL 来源；`searchRoute` 与 `extractRoute` 是下一次 `auto` 使用的有效顺序。`doctor` 只做本地配置检查，不主动调用远端 API；当已启用 Route 中存在未配置 Instance 时，命令返回 `doctor_failed` 和退出码 `1`。
+`providers` 会列出每个 Instance 的 Type、能力、Route 启用状态、凭据来源和 base URL 来源；`searchRoute`/`searchFallbackRoute` 与 `extractRoute`/`extractFallbackRoute` 是下一次 `auto` 使用的两组有效顺序。`doctor` 只做本地配置检查，不主动调用远端 API；当已启用 Route 中存在未配置 Instance 时，命令返回 `doctor_failed` 和退出码 `1`。
 
 ## HTTP 与安全边界
 

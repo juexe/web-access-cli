@@ -27,6 +27,7 @@ export const COMMANDS = [
 	"providers",
 	"doctor",
 	"config.edit",
+	"config.init",
 ] as const;
 export type Command = (typeof COMMANDS)[number];
 
@@ -56,7 +57,7 @@ export interface RouteConfig {
 
 export interface SearchConfig {
 	providers: string[];
-	_providers?: string[];
+	providers_fallback: string[];
 	limit: number;
 	timeoutMs: number;
 	attemptTimeoutMs: number;
@@ -65,7 +66,7 @@ export interface SearchConfig {
 
 export interface ExtractConfig {
 	providers: string[];
-	_providers?: string[];
+	providers_fallback: string[];
 	timeoutMs: number;
 	attemptTimeoutMs: number;
 	maxResponseBytes: number;
@@ -207,13 +208,16 @@ export interface CapabilityWarning {
 
 export interface ProviderOrderUpdate {
 	capability: Capability;
+	route: "providers" | "providers_fallback";
 	configuredProviders: string[];
 	winner?: string;
 	failed: string[];
 }
 
+export type ProviderOrderUpdates = ProviderOrderUpdate[];
+
 export type PersistProviderOrder = (
-	update: ProviderOrderUpdate,
+	updates: ProviderOrderUpdates,
 ) => Promise<void>;
 
 export interface CompactErrorInfo {
@@ -296,12 +300,27 @@ export interface ConfigEditSuccessEnvelope extends BaseEnvelope {
 	};
 }
 
+export interface ConfigInitSuccessEnvelope extends BaseEnvelope {
+	ok: true;
+	command: "config.init";
+	durationMs: number;
+	data: {
+		path: string;
+		created: true;
+		searchProviders: string[];
+		searchFallbackProviders: string[];
+		extractProviders: string[];
+		extractFallbackProviders: string[];
+	};
+}
+
 export type OutputEnvelope =
 	| SearchSuccessEnvelope
 	| ExtractSuccessEnvelope
 	| CapabilityFailureEnvelope
 	| DiagnosticSuccessEnvelope
 	| ConfigEditSuccessEnvelope
+	| ConfigInitSuccessEnvelope
 	| FailureEnvelope;
 
 export interface ProviderExecution<T> {
