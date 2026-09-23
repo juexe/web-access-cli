@@ -34,6 +34,8 @@ web-access extract "https://example.com" --provider <id> --json
 
 `auto` 通常已经尝试可回退的 Instance，并会在 Provider 返回最终非 2xx HTTP 响应时继续当前 Route；成功 Instance 会成为下次同组调用的首选，不会跨主轮和 fallback 移动。需要搜索过滤、数量或超时等选项时，运行 `web-access search --help` 或 `web-access extract --help`。
 
+当 Extract Route 任一组启用了 HTTP Instance 时，`auto` 会先探测源站 Markdown 变体（文件路径追加 `.md`，目录路径使用 `index.md`）。只有返回足够长、非 HTML 的 Markdown/plain-text 正文时才直接使用；否则透明地继续原 Route。显式非 HTTP provider 不受影响，显式 HTTP 未命中后会照常提取原 URL。
+
 配置了外部 xAI OAuth JSON 后，可使用默认 Search fallback 中的 `xai_web_search`/`xai_x_search`，或通过配置 Route 显式调整；两者读取 `XAI_AUTH_JSON`，不由 Skill 直接刷新凭据。
 
 面向人的阅读直接运行 `extract <url>`；输出前置 YAML front matter，随后是 Markdown 正文。AnySearch Extract 使用 REST 响应的 `data.content` 字段作为正文，并使用 `data.title`/`data.url` 作为可用元数据，不输出完整 JSON 响应。

@@ -347,8 +347,10 @@ test("extract auto 在前序 provider 返回非 2xx 后继续 route", async () =
 		},
 	});
 	try {
-		const transport = new MockTransport((_url) => {
-			if (transport.calls.length === 1)
+		const transport = new MockTransport((url) => {
+			if (url.endsWith(".md"))
+				return response("Markdown variant not found", { status: 404 });
+			if (url.startsWith("https://r.jina.ai/") && transport.calls.length === 2)
 				return response({ error: "jina forbidden" }, { status: 403 });
 			return response("后备 HTTP provider 返回的有效正文", {
 				contentType: "text/plain; charset=utf-8",
@@ -363,7 +365,261 @@ test("extract auto 在前序 provider 返回非 2xx 后继续 route", async () =
 		assert.equal(envelope.provider, "http");
 		assert.equal(envelope.debug?.attempts[0]?.error?.code, "auth_error");
 		assert.equal(envelope.debug?.attempts[0]?.error?.retryable, false);
+		assert.equal(transport.calls.length, 3);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("extract auto 优先命中已启用 HTTP instance 的 Markdown 变体", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: {
+			providers: ["jina"],
+			providers_fallback: ["http"],
+			minContentCharacters: 10,
+		},
+	});
+	let orderWrites = 0;
+	try {
+		const transport = new MockTransport((url, options) => {
+			assert.equal(url, "https://example.com/article.md");
+			assert.equal(options.headers?.Accept, "text/markdown, text/plain;q=0.9");
+			return response(
+				"# Markdown source\n\nProvider route should be skipped.",
+				{
+					contentType: "text/markdown; charset=utf-8",
+				},
+			);
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{
+				loaded: fixture.loaded,
+				transport,
+				debug: true,
+				persistProviderOrder: async () => {
+					orderWrites += 1;
+				},
+			},
+		);
+		assert.equal(envelope.ok, true);
+		if (!hasProvider(envelope)) return;
+		if (!("document" in envelope.data)) return;
+		assert.equal(envelope.provider, "http");
+		assert.equal(
+			envelope.data.document.sourceUrl,
+			"https://example.com/article",
+		);
+		assert.match(
+			envelope.data.document.content,
+			/Provider route should be skipped/,
+		);
+		assert.deepEqual(
+			envelope.debug?.attempts.map((attempt) => [
+				attempt.provider.id,
+				attempt.status,
+			]),
+			[["http", "success"]],
+		);
+		assert.equal(transport.calls.length, 1);
+		assert.equal(orderWrites, 0);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("extract Markdown 探测 miss 不进入 attempts 并继续既有 route", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: {
+			providers: ["jina", "http"],
+			minContentCharacters: 5,
+		},
+	});
+	try {
+		const transport = new MockTransport((url) => {
+			if (url.endsWith(".md"))
+				return response("Not found", {
+					status: 404,
+					contentType: "text/plain",
+				});
+			if (url.startsWith("https://r.jina.ai/"))
+				return response({ error: "Jina unavailable" }, { status: 503 });
+			return response("Original URL fallback returned enough content.", {
+				contentType: "text/plain",
+			});
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{ loaded: fixture.loaded, transport, debug: true },
+		);
+		assert.equal(envelope.ok, true);
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "http");
+		assert.equal(transport.calls.length, 3);
+		assert.deepEqual(
+			envelope.debug?.attempts.map((attempt) => [
+				attempt.provider.id,
+				attempt.status,
+			]),
+			[
+				["jina", "failed"],
+				["http", "success"],
+			],
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("显式非 HTTP extract provider 不执行 Markdown 探测", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: { providers: ["jina", "http"], minContentCharacters: 5 },
+	});
+	try {
+		const transport = new MockTransport((url) => {
+			assert.ok(url.startsWith("https://r.jina.ai/"));
+			return response(
+				"Title: Jina\n\nMarkdown Content:\nThis is enough content.",
+				{ contentType: "text/markdown" },
+			);
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "jina" },
+			{ loaded: fixture.loaded, transport },
+		);
+		assert.equal(envelope.ok, true);
+		assert.equal(transport.calls.length, 1);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("auto 未启用 HTTP instance 时不执行 Markdown 探测", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: { providers: ["jina"], minContentCharacters: 5 },
+	});
+	try {
+		const transport = new MockTransport((url) => {
+			assert.ok(url.startsWith("https://r.jina.ai/"));
+			assert.doesNotMatch(url, /\.md(?:\?|$)/);
+			return response("Title: Jina\n\nMarkdown Content:\nEnough content.", {
+				contentType: "text/markdown",
+			});
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{ loaded: fixture.loaded, transport },
+		);
+		assert.equal(envelope.ok, true);
+		assert.equal(transport.calls.length, 1);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("Markdown 探测网络失败时继续既有 extract route", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: {
+			providers: ["jina"],
+			providers_fallback: ["http"],
+			minContentCharacters: 5,
+		},
+	});
+	try {
+		const transport = new MockTransport((url) => {
+			if (url.endsWith(".md"))
+				throw new Error("temporary markdown probe failure");
+			assert.ok(url.startsWith("https://r.jina.ai/"));
+			return response("Title: Jina\n\nMarkdown Content:\nEnough content.", {
+				contentType: "text/markdown",
+			});
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{ loaded: fixture.loaded, transport, debug: true },
+		);
+		assert.equal(envelope.ok, true);
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "jina");
+		assert.deepEqual(
+			envelope.debug?.attempts.map((attempt) => [
+				attempt.provider.id,
+				attempt.status,
+			]),
+			[["jina", "success"]],
+		);
 		assert.equal(transport.calls.length, 2);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("Markdown 探测期间的用户取消不会软失败并继续 route", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: {
+			providers: ["jina"],
+			providers_fallback: ["http"],
+			minContentCharacters: 5,
+		},
+	});
+	const controller = new AbortController();
+	controller.abort();
+	try {
+		const transport = new MockTransport((_url, options) => {
+			assert.equal(options.signal.aborted, true);
+			throw new DOMException("cancelled", "AbortError");
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{
+				loaded: fixture.loaded,
+				transport,
+				signal: controller.signal,
+				debug: true,
+			},
+		);
+		assert.equal(envelope.ok, false);
+		if (envelope.ok || !("error" in envelope) || !("attempts" in envelope))
+			return;
+		assert.equal(envelope.error.code, "aborted");
+		assert.equal(envelope.attempts, undefined);
+		assert.equal(transport.calls.length, 1);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("显式 HTTP Markdown miss 后只提取原 URL", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: { providers: ["http"], minContentCharacters: 5 },
+	});
+	try {
+		const transport = new MockTransport((url) => {
+			if (url.endsWith(".md"))
+				return response("<html>HTML response</html>", {
+					contentType: "text/html",
+				});
+			assert.equal(url, "https://example.com/article");
+			return response("This is the original HTML extraction response.", {
+				contentType: "text/plain",
+			});
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "http" },
+			{ loaded: fixture.loaded, transport, debug: true },
+		);
+		assert.equal(envelope.ok, true);
+		assert.equal(transport.calls.length, 2);
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "http");
+		assert.equal(envelope.debug?.attempts.length, 1);
 	} finally {
 		fixture.cleanup();
 	}

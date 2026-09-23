@@ -164,10 +164,57 @@ function extractHttpDocument(
 	};
 }
 
+function markdownVariantUrl(rawUrl: string): string {
+	const url = new URL(rawUrl);
+	if (/\.md$/i.test(url.pathname)) return url.toString();
+	if (url.pathname.endsWith("/")) url.pathname += "index.md";
+	else url.pathname += ".md";
+	return url.toString();
+}
+
+function isMarkdownContentType(contentType: string): boolean {
+	const mediaType = contentType.split(";", 1)[0]?.trim();
+	return mediaType === "text/markdown" || mediaType === "text/plain";
+}
+
+function looksLikeHtml(body: string): boolean {
+	return /^\uFEFF?\s*(?:<!--[\s\S]*?-->\s*)*(?:<\?xml\b[\s\S]*?\?>\s*)*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(
+		body,
+	);
+}
+
 const http: ProviderAdapter = {
 	type: "http",
 	capabilities: ["extract"],
 	isConfigured: () => true,
+	async probeExtract(
+		request,
+	): Promise<ProviderExecution<ExtractData> | undefined> {
+		const response = await request.transport.request(
+			markdownVariantUrl(request.url),
+			{
+				headers: {
+					Accept: "text/markdown, text/plain;q=0.9",
+					...request.instance.headers,
+				},
+				signal: request.signal,
+				maxResponseBytes: request.maxResponseBytes,
+			},
+		);
+		const contentType =
+			response.headers.get("content-type")?.toLowerCase() ?? "";
+		if (
+			response.status < 200 ||
+			response.status >= 300 ||
+			!isMarkdownContentType(contentType) ||
+			looksLikeHtml(response.body)
+		)
+			return undefined;
+		const data = documentFromContent(response.body, request);
+		if (data.document.content.trim().length < request.minContentCharacters)
+			return undefined;
+		return { data, raw: response.body };
+	},
 	async extract(request): Promise<ProviderExecution<ExtractData>> {
 		const response = await request.transport.request(request.url, {
 			headers: {

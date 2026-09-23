@@ -359,4 +359,7 @@ export interface ProviderAdapter {
 	extract?(
 		request: ExtractAdapterRequest,
 	): Promise<ProviderExecution<ExtractData>>;
+	probeExtract?(
+		request: ExtractAdapterRequest,
+	): Promise<ProviderExecution<ExtractData> | undefined>;
 }

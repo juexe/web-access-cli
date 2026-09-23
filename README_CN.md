@@ -203,6 +203,8 @@ XAI hosted Search 使用 `XAI_AUTH_JSON` 指向外部 OAuth JSON 文件，每次
 4. 没有最终非 2xx 响应的不可恢复错误，例如无效输入或在成功响应中检测到不支持的内容，会立即停止。
 5. 两组实例全部失败时返回 `provider_exhausted`。提取过程中产生的最佳短正文会保留在 `partial`。
 
+执行这些 Route 前，`extract --provider auto` 会在任一组启用了 HTTP Instance 时先探测一个源站 Markdown 变体：文件型路径追加 `.md`，目录路径使用 `index.md`，请求 `text/markdown`/`text/plain`，只接受足够长且非 HTML 的文本响应。未命中或请求失败时不产生额外 attempt，并继续原有 Route；命中时结果归属已启用的 HTTP Instance，且不改变 Provider 顺序。显式非 HTTP 选择不变；显式 HTTP 会先探测 Markdown，未命中后再请求原 URL。
+
 每次 `auto` 调用完成后，成功 Instance 移到所在组队头，未尝试 Instance 保持在中间，发生上述可回退失败的 Instance 稳定移到所在组队尾；顺序学习不会跨组移动 provider。所有 Instance 都失败时顺序不变。Search 与 Extract 独立学习；显式 Instance、不可回退错误和用户取消不会更新顺序。写入采用原子替换，并发进程由最后写入者生效。
 
 Attempt 会保留 Provider 的原始错误码、HTTP status 和 `retryable` 值。`retryable` 表示原始操作是否适合对同一 Provider 重试，不再是自动 Route 切换到下一 Provider 的唯一条件。
@@ -266,6 +268,7 @@ title: "Example title"
 - 最多跟随 5 次重定向；跨 origin 重定向会移除鉴权、Cookie 和常见 token headers。
 - 所有响应都执行流式字节上限，避免先完整缓冲超大响应。
 - HTTP Extract 使用 LinkeDOM、Mozilla Readability、Turndown，并对 Next.js RSC payload 做后备解析。
+- HTTP Extract 在 route 已启用 HTTP Instance 时优先读取可用的源站 Markdown 变体（`.md` 或目录 `index.md`）。
 - PDF、图片、音频、视频、zip 和通用二进制内容会返回 `unsupported_content`。
 - 按项目设计，CLI 不阻止 localhost、私网地址或云元数据 URL。调用者必须在不可信输入场景中自行实施 URL allowlist、网络隔离或出站代理策略。
 

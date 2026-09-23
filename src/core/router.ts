@@ -235,6 +235,17 @@ async function runProviders<T>(options: {
 		execution: ProviderExecution<T>,
 		instance: ProviderInstance,
 	): WebAccessError | undefined;
+	preflight?(
+		resolved: {
+			primary: ProviderInstance[];
+			fallback: ProviderInstance[];
+			automatic: boolean;
+		},
+		signal: AbortSignal,
+		transport: HttpTransport,
+	): Promise<
+		{ provider: ProviderInstance; execution: ProviderExecution<T> } | undefined
+	>;
 }): Promise<RunResult<T> | RunFailure> {
 	const now = options.context.now ?? performance.now.bind(performance);
 	const started = now();
@@ -259,6 +270,53 @@ async function runProviders<T>(options: {
 	let lastError: WebAccessError | undefined;
 	let lastRaw: unknown;
 	let partial: RunFailure["partial"];
+	if (options.preflight) {
+		const remaining = options.totalTimeoutMs - elapsed(started, now);
+		if (remaining > 0) {
+			const preflightStarted = now();
+			const preflightSignal = AbortSignal.any([
+				...(options.context.signal ? [options.context.signal] : []),
+				AbortSignal.timeout(
+					Math.max(1, Math.min(remaining, options.attemptTimeoutMs)),
+				),
+			]);
+			try {
+				const preferred = await options.preflight(
+					resolved,
+					preflightSignal,
+					transport,
+				);
+				if (options.context.signal?.aborted)
+					return {
+						error: new WebAccessError("aborted", "请求已取消"),
+						attempts: [],
+					};
+				if (
+					!preflightSignal.aborted &&
+					preferred &&
+					!options.validate?.(preferred.execution, preferred.provider)
+				)
+					return {
+						...preferred,
+						attempts: [
+							{
+								provider: ref(preferred.provider),
+								status: "success",
+								durationMs: elapsed(preflightStarted, now),
+							},
+						],
+					};
+			} catch {
+				if (options.context.signal?.aborted)
+					return {
+						error: new WebAccessError("aborted", "请求已取消"),
+						attempts: [],
+					};
+				// Markdown preflight is an optimization. All non-cancellation
+				// failures fall through to the configured provider routes.
+			}
+		}
+	}
 	const runRound = async (
 		instances: ProviderInstance[],
 		configuredProviders: string[],
@@ -657,6 +715,27 @@ export async function executeExtract(
 					raw: execution.raw,
 				},
 			);
+		},
+		preflight: async (resolved, signal, transport) => {
+			const candidates = resolved.automatic
+				? [...resolved.primary, ...resolved.fallback]
+				: resolved.primary;
+			const instance = candidates.find(
+				(candidate) => candidate.type === "http",
+			);
+			if (!instance) return undefined;
+			const adapter = getAdapter(instance.type, "extract");
+			if (!adapter?.probeExtract || !adapter.isConfigured(instance))
+				return undefined;
+			const execution = await adapter.probeExtract({
+				url: request.url,
+				signal,
+				maxResponseBytes: config.maxResponseBytes,
+				minContentCharacters: config.minContentCharacters,
+				instance,
+				transport,
+			});
+			return execution ? { provider: instance, execution } : undefined;
 		},
 	});
 	const warnings = await persistOrderUpdate(context, result.orderUpdates);

@@ -105,6 +105,39 @@ async function extractServerUrl(t: TestContext): Promise<string> {
 	return `http://127.0.0.1:${address.port}`;
 }
 
+async function markdownExtractServerUrl(
+	t: TestContext,
+	requests: { markdown: number; original: number },
+): Promise<string> {
+	const server = createServer((request, response) => {
+		if (request.url === "/article.md") {
+			requests.markdown += 1;
+			assert.equal(request.headers.accept, "text/markdown, text/plain;q=0.9");
+			response.writeHead(200, {
+				"Content-Type": "text/markdown; charset=utf-8",
+			});
+			response.end(
+				"# Source Markdown\n\nThis content came directly from the source variant.",
+			);
+			return;
+		}
+		if (request.url === "/article") requests.original += 1;
+		response.writeHead(500, { "Content-Type": "text/plain" });
+		response.end("original URL should not be requested after a Markdown hit");
+	});
+	await new Promise<void>((resolveListen) =>
+		server.listen(0, "127.0.0.1", resolveListen),
+	);
+	t.after(
+		() =>
+			new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+	);
+	const address = server.address();
+	if (!address || typeof address === "string")
+		throw new Error("Markdown 提取测试服务器未监听 TCP 端口");
+	return `http://127.0.0.1:${address.port}`;
+}
+
 async function anySearchExtractServerUrl(t: TestContext): Promise<string> {
 	const server = createServer((request, response) => {
 		if (request.url !== "/v1/extract") {
@@ -462,6 +495,41 @@ test("CLI extract 默认输出 Markdown，--json 输出 JSON", async (t) => {
 		true,
 	);
 	assert.equal(failure.stdout.trimStart().startsWith("---"), false);
+});
+
+test("CLI extract 优先返回源站 Markdown 变体", async (t) => {
+	const requests = { markdown: 0, original: 0 };
+	const baseUrl = await markdownExtractServerUrl(t, requests);
+	const directory = mkdtempSync(
+		join(tmpdir(), "web-access-cli-markdown-preflight-"),
+	);
+	t.after(() => rmSync(directory, { recursive: true, force: true }));
+	const path = join(directory, "config.json");
+	writeFileSync(
+		path,
+		JSON.stringify({
+			providers: [{ id: "local_http", type: "http" }],
+			extract: { providers: ["local_http"], minContentCharacters: 1 },
+		}),
+		"utf8",
+	);
+	const result = await runCli(
+		["--config", path, "extract", `${baseUrl}/article`, "--json"],
+		{ ...process.env, NO_PROXY: "127.0.0.1,localhost", WEB_ACCESS_CONFIG: "" },
+	);
+	assert.equal(result.status, 0);
+	assert.equal(result.stderr, "");
+	const envelope = JSON.parse(result.stdout) as {
+		provider?: string;
+		data?: { document?: { sourceUrl?: string; content?: string } };
+	};
+	assert.equal(envelope.provider, "local_http");
+	assert.equal(envelope.data?.document?.sourceUrl, `${baseUrl}/article`);
+	assert.match(
+		envelope.data?.document?.content ?? "",
+		/directly from the source/,
+	);
+	assert.deepEqual(requests, { markdown: 1, original: 0 });
 });
 
 test("CLI extract AnySearch 只输出 data.content 中的 Markdown", async (t) => {

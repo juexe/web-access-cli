@@ -203,6 +203,8 @@ Custom instances use `apiKeyEnv` and `baseUrlEnv` to name their environment vari
 4. Non-recoverable failures without a final non-2xx response, including invalid input and unsupported content detected in a successful response, stop execution immediately.
 5. If every instance in both groups fails, the command returns `provider_exhausted`. The best short content produced during extraction is preserved in `partial`.
 
+Before those routes run, `extract --provider auto` checks one Markdown variant when an HTTP instance is enabled in either group. It appends `.md` to file-like paths or uses `index.md` for directory paths, requests `text/markdown` and `text/plain`, and accepts only a sufficiently long non-HTML text response. A miss or request failure is transparent and falls through to the configured routes. A hit is reported as the enabled HTTP instance; it does not change provider order. Explicit non-HTTP selections are unchanged, while an explicit HTTP selection checks the Markdown variant before fetching the original URL.
+
 After each `auto` call, a successful instance moves to the front of its group, untried instances remain in the middle, and instances with the fallback-eligible failures above move stably to the back. Relative order within each group is preserved; no provider crosses between primary and fallback. The order stays unchanged when every instance in a group fails. Search and Extract learn independently; explicit instances, non-fallback failures, and user cancellation never update the order. Writes use atomic replacement, and the last writer wins across concurrent processes.
 
 An attempt keeps the provider's original error code, HTTP status, and `retryable` value. `retryable` describes whether the original operation can be retried against the same provider; it is not the sole condition for switching to the next provider in an automatic route.
@@ -266,6 +268,7 @@ Exit codes:
 - Follows up to five redirects. Cross-origin redirects remove authentication, Cookie, and common token headers.
 - Enforces a streaming byte limit on every response instead of buffering an unbounded response first.
 - HTTP Extract uses LinkeDOM, Mozilla Readability, and Turndown, with fallback parsing for Next.js RSC payloads.
+- HTTP Extract prefers an enabled source Markdown variant (`.md` or directory `index.md`) before provider routes when that variant returns usable Markdown.
 - Returns `unsupported_content` for PDF, image, audio, video, zip, and general binary content.
 - By design, the CLI does not block localhost, private network addresses, or cloud metadata URLs. For untrusted input, callers must enforce their own URL allowlist, network isolation, or outbound proxy policy.
 

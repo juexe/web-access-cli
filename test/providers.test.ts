@@ -958,6 +958,89 @@ test("HTTP extract 拒绝非文本内容", async () => {
 	);
 });
 
+test("HTTP extract Markdown 探测规范化 URL、协商格式并验证正文", async (t) => {
+	const cases = [
+		{
+			url: "https://example.com/article?lang=zh",
+			expected: "https://example.com/article.md?lang=zh",
+			contentType: "text/markdown; charset=utf-8",
+		},
+		{
+			url: "https://example.com/docs/",
+			expected: "https://example.com/docs/index.md",
+			contentType: "text/plain; charset=utf-8",
+		},
+		{
+			url: "https://example.com/article.md",
+			expected: "https://example.com/article.md",
+			contentType: "text/markdown",
+		},
+	] as const;
+
+	for (const item of cases) {
+		await t.test(item.url, async () => {
+			const transport = new MockTransport((url, options) => {
+				assert.equal(url, item.expected);
+				assert.equal(
+					options.headers?.Accept,
+					"text/markdown, text/plain;q=0.9",
+				);
+				return response(
+					"# Markdown title\n\nThis is a sufficiently long markdown document.",
+					{ contentType: item.contentType },
+				);
+			});
+			const request = extractRequest("http", transport);
+			request.url = item.url;
+			request.minContentCharacters = 10;
+			request.instance.headers = { "X-Site": "docs" };
+			const adapter = getAdapter("http", "extract");
+			assert.ok(adapter?.probeExtract);
+			const result = await adapter.probeExtract(request);
+			assert.ok(result);
+			assert.equal(result.data.document.sourceUrl, item.url);
+			assert.match(result.data.document.content, /sufficiently long/);
+			assert.equal(transport.calls[0]?.options.headers?.["X-Site"], "docs");
+		});
+	}
+});
+
+test("HTTP extract Markdown 探测忽略非 Markdown、HTML 和过短正文", async (t) => {
+	const cases = [
+		{ body: "# Valid markdown but wrong media type", contentType: "text/html" },
+		{
+			body: "<html><body>Looks like HTML</body></html>",
+			contentType: "text/plain",
+		},
+		{
+			body: "\uFEFF<!-- generated --><!doctype html><html></html>",
+			contentType: "text/markdown",
+		},
+		{ body: "# Tiny", contentType: "text/markdown" },
+		{ body: "# Error page", contentType: "text/markdown", status: 404 },
+	] as const;
+
+	for (const item of cases) {
+		await t.test(
+			`${"status" in item ? item.status : 200} ${item.contentType}`,
+			async () => {
+				const transport = new MockTransport(() =>
+					response(item.body, {
+						status: "status" in item ? item.status : undefined,
+						contentType: item.contentType,
+					}),
+				);
+				const adapter = getAdapter("http", "extract");
+				assert.ok(adapter?.probeExtract);
+				assert.equal(
+					await adapter.probeExtract(extractRequest("http", transport)),
+					undefined,
+				);
+			},
+		);
+	}
+});
+
 test("RSC 后备解析器提取 Next.js flight payload", () => {
 	const paragraph = "这是来自 React Server Components 的正文内容。".repeat(10);
 	const payload = `23:${JSON.stringify([
