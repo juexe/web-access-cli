@@ -1,6 +1,6 @@
 {
 	"name": "web-access-cli",
-	"version": "0.4.0",
+	"version": "0.5.0",
 	"description": "Agent-neutral web search and content extraction CLI",
 	"license": "MIT",
 	"repository": {

@@ -70,10 +70,22 @@ jobs:
 
           archive=".artifacts/$package_name-$version.tgz"
           test -f "$archive"
-          if npm view "$package_name@$version" version --json >/dev/null 2>&1; then
-            echo "$package_name@$version 已存在，拒绝重复发布" >&2
+          registry_url="https://registry.npmjs.org/$package_name/$version"
+          if ! status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 "$registry_url")"; then
+            echo "无法查询 npm Registry，拒绝发布" >&2
             exit 1
           fi
+          case "$status" in
+            200)
+              echo "$package_name@$version 已存在，拒绝重复发布" >&2
+              exit 1
+              ;;
+            404) ;;
+            *)
+              echo "npm Registry 返回 HTTP $status，拒绝发布" >&2
+              exit 1
+              ;;
+          esac
 
           {
             echo "archive=$archive"
@@ -88,12 +100,28 @@ jobs:
       - name: 验证 npm 注册表
         shell: bash
         run: |
+          registry_url="https://registry.npmjs.org/${{ steps.release.outputs.package_name }}/${{ steps.release.outputs.version }}"
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+
           for _ in {1..60}; do
-            actual="$(npm view '${{ steps.release.outputs.package_name }}@${{ steps.release.outputs.version }}' version --json 2>/dev/null | tr -d '"' || true)"
-            if [ "$actual" = "${{ steps.release.outputs.version }}" ]; then
-              exit 0
+            if status="$(curl --silent --output "$response_file" --write-out '%{http_code}' --max-time 20 "$registry_url")"; then
+              case "$status" in
+                200)
+                  if node -e 'const fs = require("node:fs"); const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); process.exit(data.version === process.argv[2] ? 0 : 1)' "$response_file" '${{ steps.release.outputs.version }}'; then
+                    exit 0
+                  fi
+                  echo "npm Registry 返回了不匹配的版本元数据" >&2
+                  exit 1
+                  ;;
+                404|429|5??) ;;
+                *)
+                  echo "npm Registry 返回 HTTP $status" >&2
+                  exit 1
+                  ;;
+              esac
             fi
             sleep 10
           done
-          echo "npm 注册表未在 10 分钟内返回已发布版本；重试工作流前必须先人工核验" >&2
+          echo "npm Registry 未在 10 分钟内返回已发布版本；重试工作流前必须先人工核验" >&2
           exit 1

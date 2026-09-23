@@ -117,7 +117,7 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 
 ```json
 {
-  "$schema": "https://unpkg.com/web-access-cli@0.4.0/schemas/config.schema.json",
+  "$schema": "https://unpkg.com/web-access-cli@0.5.0/schemas/config.schema.json",
   "providers": [
     {
       "id": "exa_team",
