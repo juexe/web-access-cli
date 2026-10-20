@@ -176,7 +176,7 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 
 DeepSeek 使用官方工具 API：Search 请求 `{baseUrl}/v1/tools/search`，Fetch 请求 `{baseUrl}/v1/tools/fetch`，都以 Bearer 携带 `DEEPSEEK_API_KEY`。Search 发送 `count` 和 `need_content: false`，从 `results` 映射 `title`/`url`/`snippet`，仅在 `snippet` 为空时回退到更长的 `summary`，其余字段保留在 `raw`。官方 Search 没有 `freshness` 字段，因此改写为文档支持的 `after:` 搜索语法，域名条件使用 `site:`/`-site:`；两者都只是远端提示，结果仍在本地严格复核，拼接后超过 128 字符上限时丢弃远端提示并保留原始查询。Fetch 用 `content` 作为 Markdown 正文、`title` 作为标题；HTTP 404 或正文为空返回可回退的 `no_usable_content`。401 为 `auth_error`，402 为 `quota_exceeded`，429 为 `rate_limited`，其余状态为 `provider_error`；400/401/402/403 不会重试同一 Provider。
 
-XAI hosted Search 使用 `XAI_AUTH_JSON` 指向外部 OAuth JSON 文件，每次调用只读取 `access_token`，由外部 CLIProxyAPI 负责刷新和回写。可用 `authJson`/`authJsonEnv` 与 `model`/`modelEnv` 为实例覆盖路径和模型。`xai_web_search` 支持最多 5 个 allow 或 exclude 域名（两者不能同时使用）；`xai_x_search` 不接受 `freshness`。模型搜索可能需要更长时间；Search 默认单次超时 60 秒、总超时 120 秒。
+XAI hosted Search 使用 `XAI_AUTH_JSON` 指向外部 OAuth JSON 文件，每次调用只读取 `access_token`，由外部 CLIProxyAPI 负责刷新和回写。可用 `authJson`/`authJsonEnv` 与 `model`/`modelEnv` 为实例覆盖路径和模型。`xai_web_search` 支持最多 5 个 allow 或 exclude 域名（两者不能同时使用）；`xai_x_search` 将 `freshness` 映射为 hosted `x_search` 工具的 `from_date` 下界。模型搜索可能需要更长时间；Search 默认单次超时 60 秒、总超时 120 秒，而 `xai_x_search`/`xai_web_search` 可能超过 60 秒，作为主 provider 使用时应调高 `attemptTimeoutMs`。
 
 ### 凭据和 URL
 

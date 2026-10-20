@@ -11,6 +11,7 @@ import { buildEndpoint } from "../transport/http.ts";
 import { VERSION } from "../version.ts";
 import {
 	assertOk,
+	freshnessStartDate,
 	normalizeHits,
 	parseJsonResponse,
 	ref,
@@ -25,6 +26,8 @@ const PROTECTED_HEADERS = new Set([
 	"x-xai-token-auth",
 	"x-grok-client-version",
 	"x-grok-client-identifier",
+	"x-grok-client-mode",
+	"x-grok-model-override",
 	"x-authenticateresponse",
 	"user-agent",
 ]);
@@ -164,6 +167,7 @@ function mapResponse(
 function requestHeaders(
 	request: SearchAdapterRequest,
 	token: string,
+	model: string,
 ): Record<string, string> {
 	const headers = Object.fromEntries(
 		Object.entries(request.instance.headers).filter(
@@ -174,8 +178,10 @@ function requestHeaders(
 		...headers,
 		Authorization: `Bearer ${token}`,
 		"X-XAI-Token-Auth": "xai-grok-cli",
-		"x-grok-client-version": "0.2.120",
+		"x-grok-client-version": "1.0.60",
 		"x-grok-client-identifier": "grok-shell",
+		"x-grok-client-mode": "headless",
+		"x-grok-model-override": model,
 		"x-authenticateresponse": "authenticate-response",
 		"Content-Type": "application/json",
 		Accept: "application/json",
@@ -195,12 +201,6 @@ function createAdapter(
 			!!instance.authJson &&
 			existsSync(resolve(instance.authJson)),
 		async search(request): Promise<ProviderExecution<SearchData>> {
-			if (type === "xai_x_search" && request.freshness)
-				throw new WebAccessError(
-					"provider_unavailable",
-					"xAI x_search 不支持 freshness",
-					{ provider: ref(request.instance), retryable: true },
-				);
 			if (
 				type === "xai_web_search" &&
 				request.includeDomains.length > 0 &&
@@ -221,9 +221,15 @@ function createAdapter(
 					{ provider: ref(request.instance), retryable: true },
 				);
 			const token = readAccessToken(request);
+			const model = request.instance.model ?? "grok-4.6";
 			const tool =
 				type === "xai_x_search"
-					? { type: "x_search" }
+					? {
+							type: "x_search",
+							...(request.freshness
+								? { from_date: freshnessStartDate(request.freshness) }
+								: {}),
+						}
 					: {
 							type: "web_search",
 							...(request.includeDomains.length > 0 ||
@@ -251,9 +257,9 @@ function createAdapter(
 				buildEndpoint(requireBaseUrl(request.instance), "responses"),
 				{
 					method: "POST",
-					headers: requestHeaders(request, token),
+					headers: requestHeaders(request, token, model),
 					body: JSON.stringify({
-						model: request.instance.model ?? "grok-4.6",
+						model,
 						input: `Search the web for: ${request.query}`,
 						tools: [tool],
 					}),

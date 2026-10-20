@@ -36,7 +36,7 @@ web-access extract "https://example.com" --provider <id> --json
 
 当 Extract Route 任一组启用了 HTTP Instance 时，`auto` 会先探测源站 Markdown 变体（文件路径追加 `.md`，目录路径使用 `index.md`）。只有返回足够长、非 HTML 的 Markdown/plain-text 正文时才直接使用；否则透明地继续原 Route。显式非 HTTP provider 不受影响，显式 HTTP 未命中后会照常提取原 URL。
 
-配置了外部 xAI OAuth JSON 后，可使用默认 Search fallback 中的 `xai_web_search`/`xai_x_search`，或通过配置 Route 显式调整；两者读取 `XAI_AUTH_JSON`，不由 Skill 直接刷新凭据。
+配置了外部 xAI OAuth JSON 后，可使用默认 Search fallback 中的 `xai_web_search`/`xai_x_search`，或通过配置 Route 显式调整；两者读取 `XAI_AUTH_JSON`，不由 Skill 直接刷新凭据。两者都是模型搜索，单次常超过默认 60 秒预算，作为主 provider 时需要调高 `attemptTimeoutMs`；`xai_x_search` 会把 `--freshness` 传给 `x_search` 工具的 `from_date`。
 
 面向人的阅读直接运行 `extract <url>`；输出前置 YAML front matter，随后是 Markdown 正文。AnySearch Extract 使用 REST 响应的 `data.content` 字段作为正文，并使用 `data.title`/`data.url` 作为可用元数据，不输出完整 JSON 响应。
 

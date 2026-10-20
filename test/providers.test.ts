@@ -9,7 +9,11 @@ import type {
 	ProviderType,
 	SearchAdapterRequest,
 } from "../src/core/types.ts";
-import { assertOk, parseJsonResponse } from "../src/providers/common.ts";
+import {
+	assertOk,
+	freshnessStartDate,
+	parseJsonResponse,
+} from "../src/providers/common.ts";
 import { getAdapter } from "../src/providers/registry.ts";
 import { extractRscMarkdown } from "../src/providers/rsc.ts";
 import { instance, MockTransport, response } from "./helpers.ts";
@@ -714,6 +718,9 @@ test("xAI hosted search 映射引用、域名过滤并脱敏 OAuth token", async
 			assert.equal(options.headers?.Authorization, "Bearer oauth-secret-token");
 			assert.equal(options.headers?.["X-XAI-Token-Auth"], "xai-grok-cli");
 			assert.equal(options.headers?.["x-grok-client-identifier"], "grok-shell");
+			assert.equal(options.headers?.["x-grok-client-version"], "1.0.60");
+			assert.equal(options.headers?.["x-grok-client-mode"], "headless");
+			assert.equal(options.headers?.["x-grok-model-override"], "grok-4.6");
 			const body = JSON.parse(options.body ?? "");
 			assert.equal(body.model, "grok-4.6");
 			assert.deepEqual(body.tools, [
@@ -784,7 +791,7 @@ test("xAI hosted search 映射引用、域名过滤并脱敏 OAuth token", async
 	}
 });
 
-test("xAI x_search 拒绝 freshness，并只接受真实引用", async () => {
+test("xAI x_search 将 freshness 映射为 from_date，并从 url_citation 提取引用", async () => {
 	const directory = mkdtempSync(join(tmpdir(), "web-access-xai-"));
 	const authPath = join(directory, "auth.json");
 	writeFileSync(
@@ -793,18 +800,78 @@ test("xAI x_search 拒绝 freshness，并只接受真实引用", async () => {
 		"utf8",
 	);
 	try {
-		const transport = new MockTransport(() => response({ output: [] }));
+		const transport = new MockTransport((url, options) => {
+			assert.equal(url, "https://xai_x_search.test/responses");
+			assert.equal(options.headers?.Authorization, "Bearer oauth-secret-token");
+			assert.equal(options.headers?.["x-grok-client-mode"], "headless");
+			assert.equal(options.headers?.["x-grok-model-override"], "grok-4.6");
+			const body = JSON.parse(options.body ?? "");
+			assert.equal(body.model, "grok-4.6");
+			assert.deepEqual(body.tools, [
+				{ type: "x_search", from_date: freshnessStartDate("month") },
+			]);
+			return response({
+				output: [
+					{
+						type: "custom_tool_call",
+						name: "x_keyword_search",
+						input: '{"query":"agent neutral web cli","limit":"10"}',
+						status: "completed",
+					},
+					{
+						type: "message",
+						content: [
+							{
+								type: "output_text",
+								text: "Posts agree the CLI is useful.",
+								annotations: [
+									{
+										type: "url_citation",
+										url: "https://x.com/example/status/1",
+										title: "example",
+										start_index: 0,
+										end_index: 6,
+									},
+									{
+										type: "url_citation",
+										url: "https://x.com/blocked/status/2",
+										title: "blocked",
+										start_index: 7,
+										end_index: 14,
+									},
+								],
+							},
+						],
+					},
+				],
+				token: "oauth-secret-token",
+			});
+		});
 		const adapter = getAdapter("xai_x_search", "search");
 		assert.ok(adapter?.search);
 		const request = searchRequest("xai_x_search", transport);
+		// x_search 不支持域名过滤，交给上层本地复核；这里只验证 freshness 与引用映射。
+		request.includeDomains = [];
+		request.excludeDomains = [];
 		request.instance.authJson = authPath;
-		await assert.rejects(
-			adapter.search(request),
-			(error: unknown) =>
-				error instanceof WebAccessError &&
-				error.code === "provider_unavailable" &&
-				transport.calls.length === 0,
-		);
+		request.instance.baseUrl = "https://xai_x_search.test";
+		request.instance.model = "grok-4.6";
+		const result = await adapter.search(request);
+		assert.deepEqual(result.data.results, [
+			{
+				rank: 1,
+				title: "example",
+				url: "https://x.com/example/status/1",
+				snippet: "Posts agree the CLI is useful.",
+			},
+			{
+				rank: 2,
+				title: "blocked",
+				url: "https://x.com/blocked/status/2",
+				snippet: "Posts agree the CLI is useful.",
+			},
+		]);
+		assert.doesNotMatch(JSON.stringify(result.raw), /oauth-secret-token/);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
 	}
