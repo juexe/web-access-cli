@@ -68,7 +68,7 @@ deploy/
 - `summary` 直接复制 `snippet`，不生成 600–800 字长摘要；`snippet` 长度取决于上游 provider。
 - 不保证结果数量（可能少于 `count`）、排序或摘要质量与官方一致；不重新分页，也不跨 provider 凑数。
 - `ori_question` 与 `localization` 会被接受并校验，但当前中立核心没有对应能力，**不会**影响 provider 请求，也不会拼进 `query`。
-- `count` 接受 1–50；CLI 与配置文件的 limit 上限仍是 20。各 provider 还会按上游能力进一步限制出站数量（Tavily 20、Brave 20、AnySearch 10、XCrawl 带域名过滤时 `max(20, count)`）。
+- `count` 接受 1–50；CLI 与配置文件的 limit 上限仍是 20。各 provider 还会按上游能力进一步限制出站数量（Tavily 20、Brave 20、AnySearch 10、元宝搜索按 10 向上取整且上限 50、XCrawl 带域名过滤时 `max(20, count)`）。
 - 网关不写回 provider 顺序：服务运行期间使用启动时加载的配置快照，重启后才会读取磁盘上的新顺序。
 
 ## 正文补抓

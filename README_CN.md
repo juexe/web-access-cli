@@ -5,7 +5,7 @@
 [![CI](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-一个 Agent-neutral 的网页能力 CLI。它把“搜索”和“网页正文提取”定义为稳定能力，把 Tavily、Exa、Bocha、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、Firecrawl、Jina 等差异收敛到内部统一 schema。
+一个 Agent-neutral 的网页能力 CLI。它把“搜索”和“网页正文提取”定义为稳定能力，把 Tavily、Exa、Bocha、元宝搜索、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、Firecrawl、Jina 等差异收敛到内部统一 schema。
 
 CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCode 或其他 Agent。Skill、MCP 和 Agent 插件只能作为 CLI 上层 adapter 接入，不能污染核心能力和 Provider 实现。
 
@@ -13,7 +13,7 @@ CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCo
 
 | 能力 | Provider Type | 统一输出 |
 | --- | --- | --- |
-| `search` | Tavily、Exa、Bocha、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、xAI x_search、xAI web_search | `rank`、`title`、`url`、`snippet` |
+| `search` | Tavily、Exa、Bocha、元宝搜索、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、xAI x_search、xAI web_search | `rank`、`title`、`url`、`snippet` |
 | `extract` | Firecrawl v2、Jina Reader、Exa Contents、AnySearch、XCrawl、HTTP | Markdown `Document` |
 
 Provider Type 描述实现类型；Provider Instance 是一份可配置实例。一个 Type 可以有多个 Instance，例如 `exa_team` 和 `exa_personal`。每个能力都有主 `providers` Route 和兜底 `providers_fallback` Route；两组数组同时决定启用状态和 `auto` 顺序，CLI 只在原分组内部调整成员顺序。
@@ -161,16 +161,18 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 }
 ```
 
-内置 Instance 为 `tavily`、`exa`、`bocha`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`、`xcrawl`、`deepseek`、`xai_x_search`、`xai_web_search`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。出现在对应主 Route 或 fallback Route 中的实例才启用。Bocha 默认 base URL 为 `https://api.bocha.cn`，必须配置 API key；AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用；XCrawl 默认 base URL 为 `https://run.xcrawl.com`，必须配置 API key；DeepSeek 默认 base URL 为 `https://api.deepseek.com/anthropic/v1`，必须配置 API key。
+内置 Instance 为 `tavily`、`exa`、`bocha`、`yuanbao`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`、`xcrawl`、`deepseek`、`xai_x_search`、`xai_web_search`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。出现在对应主 Route 或 fallback Route 中的实例才启用。Bocha 默认 base URL 为 `https://api.bocha.cn`，必须配置 API key；元宝搜索默认 base URL 为 `https://api.wsa.cloud.tencent.com`，必须配置服务 API KEY；AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用；XCrawl 默认 base URL 为 `https://run.xcrawl.com`，必须配置 API key；DeepSeek 默认 base URL 为 `https://api.deepseek.com/anthropic/v1`，必须配置 API key。
 
 默认 Route：
 
-- Search 主轮：`tavily -> exa -> bocha -> brave -> searxng -> anysearch -> xcrawl`
+- Search 主轮：`tavily -> exa -> bocha -> yuanbao -> brave -> searxng -> anysearch -> xcrawl`
 - Search fallback：`deepseek -> xai_x_search -> xai_web_search`
 - Extract 主轮：`firecrawl -> jina -> exa -> anysearch -> xcrawl`
 - Extract fallback：`http`
 
 默认 Route 将内置 provider 分为主轮和 fallback。自定义 ID 会合并到 Instance 列表，但仍需显式加入 Route；省略能力 Route 时使用上述默认分组，Search 主 Route 显式空数组会报错，Extract 主 Route 可以显式为空以禁用 Extract。`auto` 会跳过未完成配置的 Instance。AnySearch 与 XCrawl 可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
+
+元宝搜索调用腾讯云 `POST /SearchPro`，使用 Bearer 服务 API KEY 和小写驼峰请求体（`Query`，可选 `Site` 与 `Freshness`）。单个 `site:` 指定域名改写为 `Site=<domain>`，不超过五个排除域名改写为 `Site=exclude:<domain>|<domain>`，其余组合只在本地过滤。`Pages` 的每一项都是 JSON 字符串，映射为 `title`/`url`/`snippet`，摘要优先取标准摘要 `passage`，其次才是动态摘要 `content`。HTTP 200 中返回的 `UnauthorizedOperation`、`ResourceNotFound` 等业务错误保持可回退，`auto` 会继续尝试下一个 Provider。该 Provider 仅支持 Search；`--limit` 不超过 10 时不发送 `Cnt`，以免极速版拒绝请求，超出时按 10 向上取整发送（上限 50）。
 
 DeepSeek Search 通过 Anthropic-compatible Messages API 调用原生 `web_search_20250305` server tool，一次搜索是完整模型轮次，因此延迟和成本可能高于专用搜索 endpoint。它位于默认 Search fallback，仅在全部主轮 Provider 未配置、返回最终非 2xx HTTP 响应或发生其他可恢复失败后触发。Adapter 只接受 `web_search_tool_result` 中的结构化 URL，按 URL 合并 citation 摘要，绝不从模型 prose 中猜测 URL。域名条件会改写查询并在本地再次严格过滤；DeepSeek 不支持 `freshness`，遇到该参数时以可恢复错误跳过；重定向会被严格拒绝，且不会访问 `Location` 目标。Provider 私有的 `encrypted_content` 是 CLI 无法展示或解码的 opaque payload，不具备诊断价值，因此会从 `raw` 中移除。
 

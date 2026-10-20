@@ -157,6 +157,7 @@ test("默认配置缺失时创建完整配置并写入内部顺序", async (t) =
 	assert.deepEqual(parsed.search.providers, [
 		"exa",
 		"bocha",
+		"yuanbao",
 		"brave",
 		"searxng",
 		"anysearch",

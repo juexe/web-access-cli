@@ -61,6 +61,10 @@
                   },
                   {
                     "type": "string",
+                    "const": "yuanbao"
+                  },
+                  {
+                    "type": "string",
                     "const": "brave"
                   },
                   {

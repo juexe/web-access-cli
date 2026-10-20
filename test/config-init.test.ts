@@ -37,7 +37,7 @@ test("config init 按标准凭据筛选主 Route 并写入公开 fallback", asyn
 			search: { providers: string[]; providers_fallback: string[] };
 			extract: { providers: string[]; providers_fallback: string[] };
 		};
-		assert.equal(parsed.providers.length, 13);
+		assert.equal(parsed.providers.length, 14);
 		assert.deepEqual(parsed.search.providers, ["tavily"]);
 		assert.deepEqual(parsed.search.providers_fallback, []);
 		assert.deepEqual(parsed.extract.providers, ["firecrawl"]);

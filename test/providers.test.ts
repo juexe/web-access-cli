@@ -296,6 +296,146 @@ test("Bocha 缺省 freshness、空结果、业务码和 HTTP 403 映射稳定", 
 	});
 });
 
+test("元宝搜索使用 SearchPro 协议、Site 过滤并解析字符串 Pages", async () => {
+	const page = (value: Record<string, unknown>) => JSON.stringify(value);
+	const transport = new MockTransport((url, options) => {
+		assert.equal(url, "https://yuanbao.test/SearchPro");
+		assert.equal(options.method, "POST");
+		assert.equal(options.signal, signal);
+		assert.equal(options.maxResponseBytes, 1024 * 1024);
+		assert.equal(options.headers?.Authorization, "Bearer test-key");
+		assert.equal(options.headers?.["Content-Type"], "application/json");
+		assert.equal(options.headers?.Accept, "application/json");
+		assert.equal(options.headers?.["X-Team"], "search");
+		assert.equal(options.headers?.authorization, undefined);
+		assert.deepEqual(JSON.parse(options.body ?? ""), {
+			Query: "agent neutral web cli",
+			Site: "exclude:blocked.example.com",
+			Freshness: "m1",
+		});
+		return response({
+			Response: {
+				Query: "agent neutral web cli",
+				Version: "standard",
+				Pages: [
+					page({
+						title: "A",
+						url: "https://example.com/a#fragment",
+						passage: "first passage",
+						content: "dynamic abstract",
+						score: 0.9,
+					}),
+					page({ title: "blocked", url: "https://blocked.example.com/b" }),
+					page({ title: "B", url: "https://example.com/b", passage: "  " }),
+					"not json",
+				],
+			},
+		});
+	});
+	const adapter = getAdapter("yuanbao", "search");
+	assert.ok(adapter?.search);
+	const request = searchRequest("yuanbao", transport);
+	request.includeDomains = [];
+	request.excludeDomains = ["blocked.example.com"];
+	request.limit = 10;
+	request.instance.headers = { "X-Team": "search", authorization: "Bearer x" };
+	const result = await adapter.search(request);
+	assert.deepEqual(result.data.results, [
+		{
+			rank: 1,
+			title: "A",
+			url: "https://example.com/a",
+			snippet: "first passage",
+		},
+		{ rank: 2, title: "B", url: "https://example.com/b", snippet: "" },
+	]);
+});
+
+test("元宝搜索边界：排除域名、无过滤、空结果与业务错误", async (t) => {
+	await t.test("exclude site and empty pages", async () => {
+		const transport = new MockTransport((_url, options) => {
+			assert.deepEqual(JSON.parse(options.body ?? ""), {
+				Query: "agent neutral web cli",
+				Site: "exclude:blocked.example.com|other.example.com",
+			});
+			return response({ Response: { Query: "q", Pages: [] } });
+		});
+		const adapter = getAdapter("yuanbao", "search");
+		assert.ok(adapter?.search);
+		const request = searchRequest("yuanbao", transport);
+		request.includeDomains = [];
+		request.excludeDomains = ["blocked.example.com", "other.example.com"];
+		request.freshness = undefined;
+		assert.deepEqual((await adapter.search(request)).data.results, []);
+	});
+	await t.test("business error is retryable and redacts key", async () => {
+		const transport = new MockTransport(() =>
+			response({
+				Response: {
+					Error: {
+						Code: "UnauthorizedOperation",
+						Message: "bad test-key",
+					},
+					RequestId: "request-1",
+				},
+			}),
+		);
+		const adapter = getAdapter("yuanbao", "search");
+		assert.ok(adapter?.search);
+		await assert.rejects(
+			adapter.search(searchRequest("yuanbao", transport)),
+			(error: unknown) =>
+				error instanceof WebAccessError &&
+				error.code === "auth_error" &&
+				error.retryable &&
+				!error.message.includes("test-key") &&
+				!JSON.stringify(error.raw).includes("test-key"),
+		);
+	});
+	await t.test("resource not found maps to quota", async () => {
+		const transport = new MockTransport(() =>
+			response({ Response: { Error: { Code: "ResourceNotFound" } } }),
+		);
+		const adapter = getAdapter("yuanbao", "search");
+		assert.ok(adapter?.search);
+		await assert.rejects(
+			adapter.search(searchRequest("yuanbao", transport)),
+			(error: unknown) =>
+				error instanceof WebAccessError && error.code === "quota_exceeded",
+		);
+	});
+	await t.test("HTTP 429 uses rate limit", async () => {
+		const transport = new MockTransport(() =>
+			response(
+				{ Response: { Error: { Code: "RequestLimitExceeded" } } },
+				{ status: 429 },
+			),
+		);
+		const adapter = getAdapter("yuanbao", "search");
+		assert.ok(adapter?.search);
+		await assert.rejects(
+			adapter.search(searchRequest("yuanbao", transport)),
+			(error: unknown) =>
+				error instanceof WebAccessError &&
+				error.code === "rate_limited" &&
+				error.httpStatus === 429 &&
+				error.retryable,
+		);
+	});
+	await t.test("all malformed pages are invalid_response", async () => {
+		const transport = new MockTransport(() =>
+			response({ Response: { Pages: ["not json"] } }),
+		);
+		const adapter = getAdapter("yuanbao", "search");
+		assert.ok(adapter?.search);
+		await assert.rejects(
+			adapter.search(searchRequest("yuanbao", transport)),
+			(error: unknown) =>
+				error instanceof WebAccessError && error.code === "invalid_response",
+		);
+	});
+});
+
 test("DeepSeek 使用固定 Messages 协议并只映射结构化搜索结果", async () => {
 	const transport = new MockTransport((url, options) => {
 		assert.equal(url, "https://deepseek.test/messages");
@@ -1180,6 +1320,33 @@ test("各 provider 仅限制自身出站 count，且不修改共享 SearchReques
 		await adapter.search(largeRequest);
 		assert.equal(JSON.parse(large.calls[0]?.options.body ?? "").limit, 50);
 	});
+
+	await t.test(
+		"元宝搜索 limit<=10 省略 Cnt，更大时按 10 取整且上限 50",
+		async () => {
+			for (const [limit, expected] of [
+				[3, undefined],
+				[10, undefined],
+				[11, 20],
+				[20, 20],
+				[50, 50],
+				[99, 50],
+			] as const) {
+				const transport = new MockTransport(() =>
+					response({ Response: { Pages: [] } }),
+				);
+				const adapter = getAdapter("yuanbao", "search");
+				assert.ok(adapter?.search);
+				const request = searchRequest("yuanbao", transport);
+				request.freshness = undefined;
+				request.limit = limit;
+				await adapter.search(request);
+				const body = JSON.parse(transport.calls[0]?.options.body ?? "");
+				assert.equal(body.Cnt, expected, `limit ${limit}`);
+				assert.equal(request.limit, limit);
+			}
+		},
+	);
 
 	await t.test("SearXNG 保持现有实现且按原始 limit 规范化", async () => {
 		const many = Array.from({ length: 60 }, (_, index) => ({

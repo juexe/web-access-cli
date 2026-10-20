@@ -118,6 +118,10 @@
                     },
                     {
                       "type": "string",
+                      "const": "yuanbao"
+                    },
+                    {
+                      "type": "string",
                       "const": "brave"
                     },
                     {
@@ -193,6 +197,10 @@
                           {
                             "type": "string",
                             "const": "bocha"
+                          },
+                          {
+                            "type": "string",
+                            "const": "yuanbao"
                           },
                           {
                             "type": "string",
@@ -297,6 +305,10 @@
                               },
                               {
                                 "type": "string",
+                                "const": "yuanbao"
+                              },
+                              {
+                                "type": "string",
                                 "const": "brave"
                               },
                               {
@@ -379,6 +391,10 @@
                         {
                           "type": "string",
                           "const": "bocha"
+                        },
+                        {
+                          "type": "string",
+                          "const": "yuanbao"
                         },
                         {
                           "type": "string",
@@ -546,6 +562,10 @@
                     },
                     {
                       "type": "string",
+                      "const": "yuanbao"
+                    },
+                    {
+                      "type": "string",
                       "const": "brave"
                     },
                     {
@@ -621,6 +641,10 @@
                           {
                             "type": "string",
                             "const": "bocha"
+                          },
+                          {
+                            "type": "string",
+                            "const": "yuanbao"
                           },
                           {
                             "type": "string",
@@ -725,6 +749,10 @@
                               },
                               {
                                 "type": "string",
+                                "const": "yuanbao"
+                              },
+                              {
+                                "type": "string",
                                 "const": "brave"
                               },
                               {
@@ -807,6 +835,10 @@
                         {
                           "type": "string",
                           "const": "bocha"
+                        },
+                        {
+                          "type": "string",
+                          "const": "yuanbao"
                         },
                         {
                           "type": "string",
@@ -1022,6 +1054,10 @@
                     },
                     {
                       "type": "string",
+                      "const": "yuanbao"
+                    },
+                    {
+                      "type": "string",
                       "const": "brave"
                     },
                     {
@@ -1097,6 +1133,10 @@
                           {
                             "type": "string",
                             "const": "bocha"
+                          },
+                          {
+                            "type": "string",
+                            "const": "yuanbao"
                           },
                           {
                             "type": "string",
@@ -1201,6 +1241,10 @@
                               },
                               {
                                 "type": "string",
+                                "const": "yuanbao"
+                              },
+                              {
+                                "type": "string",
                                 "const": "brave"
                               },
                               {
@@ -1283,6 +1327,10 @@
                         {
                           "type": "string",
                           "const": "bocha"
+                        },
+                        {
+                          "type": "string",
+                          "const": "yuanbao"
                         },
                         {
                           "type": "string",
@@ -1577,6 +1625,10 @@
                     {
                       "type": "string",
                       "const": "bocha"
+                    },
+                    {
+                      "type": "string",
+                      "const": "yuanbao"
                     },
                     {
                       "type": "string",

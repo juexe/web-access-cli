@@ -2,6 +2,7 @@ export const PROVIDER_TYPES = [
 	"tavily",
 	"exa",
 	"bocha",
+	"yuanbao",
 	"brave",
 	"searxng",
 	"firecrawl",

@@ -139,6 +139,58 @@ test("XCrawl 缺少凭据时 doctor 报告未完成配置", () => {
 	}
 });
 
+test("元宝搜索配置标准环境变量、默认端点与 Search-only capability", () => {
+	const fixture = configFile({
+		providers: [
+			{
+				id: "yuanbao",
+				type: "yuanbao",
+				headers: { "X-Team": "search" },
+			},
+		],
+		search: { providers: ["yuanbao"] },
+		extract: { providers: ["http"] },
+	});
+	try {
+		const fromEnv = loadConfig(fixture.path, {
+			YUANBAO_API_KEY: "yuanbao-key",
+			YUANBAO_BASE_URL: "https://wsa.internal/",
+		});
+		const yuanbao = fromEnv.instances.find((item) => item.id === "yuanbao");
+		assert.equal(yuanbao?.apiKey, "yuanbao-key");
+		assert.equal(yuanbao?.credentialSource, "standard_env");
+		assert.equal(yuanbao?.baseUrl, "https://wsa.internal");
+		assert.equal(yuanbao?.baseUrlSource, "standard_env");
+		assert.equal(yuanbao?.headers["X-Team"], "search");
+		assert.equal(capabilitySupports("yuanbao", "search"), true);
+		assert.equal(capabilitySupports("yuanbao", "extract"), false);
+		assert.equal(executeDoctor(fromEnv).ok, true);
+
+		const plain = loadConfig(fixture.path, {});
+		const unconfigured = plain.instances.find((item) => item.id === "yuanbao");
+		assert.equal(unconfigured?.apiKey, null);
+		assert.equal(unconfigured?.baseUrl, "https://api.wsa.cloud.tencent.com");
+		assert.equal(unconfigured?.baseUrlSource, "default");
+		assert.equal(unconfigured?.searchFilterMode, null);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("元宝搜索不能进入 Extract route 或配置 searchFilterMode", () => {
+	const extract = configFile({ extract: { providers: ["yuanbao"] } });
+	const filterMode = configFile({
+		providers: [{ id: "yuanbao", type: "yuanbao", searchFilterMode: "strict" }],
+	});
+	try {
+		assert.throws(() => loadConfig(extract.path, {}), isConfigError);
+		assert.throws(() => loadConfig(filterMode.path, {}), isConfigError);
+	} finally {
+		extract.cleanup();
+		filterMode.cleanup();
+	}
+});
+
 test("DeepSeek 使用标准 key、通用覆盖和 Search-only capability", () => {
 	const fixture = configFile({
 		providers: [
@@ -353,6 +405,7 @@ test("providers 省略或为空时合并全部内置 instance，自定义 id 只
 		"tavily",
 		"exa",
 		"bocha",
+		"yuanbao",
 		"brave",
 		"searxng",
 		"firecrawl",
@@ -412,6 +465,7 @@ test("缺省 route 按主轮与 fallback 分组，Search 主轮不能为空", ()
 			"tavily",
 			"exa",
 			"bocha",
+			"yuanbao",
 			"brave",
 			"searxng",
 			"anysearch",

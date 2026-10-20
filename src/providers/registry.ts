@@ -10,6 +10,7 @@ import { EXTRACT_ADAPTERS } from "./extract.ts";
 import { EXA_ADAPTER, SEARCH_ADAPTERS } from "./search.ts";
 import { XAI_WEB_SEARCH_ADAPTER, XAI_X_SEARCH_ADAPTER } from "./xai.ts";
 import { XCRAWL_ADAPTER } from "./xcrawl.ts";
+import { YUANBAO_ADAPTER } from "./yuanbao.ts";
 
 const adapters = [...SEARCH_ADAPTERS, ...EXTRACT_ADAPTERS].reduce<
 	Map<ProviderType, ProviderAdapter>
@@ -31,6 +32,7 @@ const adapters = [...SEARCH_ADAPTERS, ...EXTRACT_ADAPTERS].reduce<
 	new Map([
 		[EXA_ADAPTER.type, EXA_ADAPTER],
 		[BOCHA_ADAPTER.type, BOCHA_ADAPTER],
+		[YUANBAO_ADAPTER.type, YUANBAO_ADAPTER],
 		[ANYSEARCH_ADAPTER.type, ANYSEARCH_ADAPTER],
 		[XCRAWL_ADAPTER.type, XCRAWL_ADAPTER],
 		[DEEPSEEK_ADAPTER.type, DEEPSEEK_ADAPTER],
