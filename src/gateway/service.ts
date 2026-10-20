@@ -60,14 +60,21 @@ export interface GatewayReadiness {
 	reason?: string;
 }
 
+/** Optional success metadata for the request panel; never part of the protocol. */
+export interface GatewayServiceObserver {
+	onSuccess?(info: { provider: string }): void;
+}
+
 export interface GatewayService {
 	search(
 		request: GatewaySearchRequest,
 		signal: AbortSignal,
+		observer?: GatewayServiceObserver,
 	): Promise<GatewaySearchResponse>;
 	fetch(
 		request: GatewayFetchRequest,
 		signal: AbortSignal,
+		observer?: GatewayServiceObserver,
 	): Promise<GatewayFetchResponse>;
 	readiness(): GatewayReadiness;
 }
@@ -78,6 +85,8 @@ export class GatewayHttpError extends Error {
 	readonly type: string;
 	readonly code: string;
 	readonly retryAfterSeconds?: number;
+	/** Last provider that actually failed, filled by `classifyFailure` for the panel. */
+	provider?: string;
 
 	constructor(options: {
 		status: number;
@@ -318,6 +327,18 @@ function failureOf(envelope: OutputEnvelope): {
 	};
 }
 
+function lastAttemptProvider(failure: {
+	attempts?: CapabilityAttemptSummary[];
+}): string | undefined {
+	const attempts = failure.attempts ?? [];
+	for (let index = attempts.length - 1; index >= 0; index--) {
+		const attempt = attempts[index];
+		if (!attempt || attempt.code === "provider_unavailable") continue;
+		return attempt.provider;
+	}
+	return undefined;
+}
+
 function mapHit(hit: SearchHit): GatewaySearchResult {
 	return {
 		rerank_score: 0,
@@ -351,7 +372,10 @@ export function createGatewayService(
 		envelope: OutputEnvelope,
 		capability: "search" | "extract",
 	): never {
-		throw classifyFailure(loaded, failureOf(envelope), capability);
+		const failure = failureOf(envelope);
+		const error = classifyFailure(loaded, failure, capability);
+		error.provider = lastAttemptProvider(failure);
+		throw error;
 	}
 
 	async function readContent(
@@ -431,7 +455,7 @@ export function createGatewayService(
 	return {
 		readiness: () => readiness,
 
-		async search(request, clientSignal) {
+		async search(request, clientSignal, observer) {
 			if (clientSignal.aborted) throw new GatewayClientAbort();
 			const stageTimeoutMs = loaded.app.search.timeoutMs;
 			const deadline = now() + stageTimeoutMs;
@@ -465,6 +489,8 @@ export function createGatewayService(
 				throw timeoutError();
 			const data = successData<{ results: SearchHit[] }>(envelope);
 			if (!data) fail(envelope, "search");
+			if (envelope.ok && "provider" in envelope)
+				observer?.onSuccess?.({ provider: envelope.provider });
 			const hits = data.results;
 			const results = hits.map(mapHit);
 			if (!request.need_content || results.length === 0) {
@@ -499,7 +525,7 @@ export function createGatewayService(
 			return { results };
 		},
 
-		async fetch(request, clientSignal) {
+		async fetch(request, clientSignal, observer) {
 			if (clientSignal.aborted) throw new GatewayClientAbort();
 			const stageTimeoutMs = loaded.app.extract.timeoutMs;
 			const deadline = now() + stageTimeoutMs;
@@ -530,6 +556,8 @@ export function createGatewayService(
 				document: { title: string; content: string };
 			}>(envelope)?.document;
 			if (!document) fail(envelope, "extract");
+			if (envelope.ok && "provider" in envelope)
+				observer?.onSuccess?.({ provider: envelope.provider });
 			const response: GatewayFetchResponse = {
 				title: document.title ?? "",
 				content: document.content,

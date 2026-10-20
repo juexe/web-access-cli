@@ -31,11 +31,15 @@ The gateway must reuse the existing provider, router and transport implementatio
 
 **Health.** `GET /healthz` reports process liveness and `GET /readyz` reports configuration/lifecycle readiness. Readiness requires each capability route (primary plus fallback) to contain at least one configured adapter. It does not call paid APIs and cannot be reused as the doctor policy.
 
+**Request records panel.** `GET /` and `GET /panel` serve one self-contained HTML document with a per-response nonce-based CSP and no build assets or third-party scripts. `GET /admin/api/records` returns the most recent authenticated tool requests from an in-memory 500-entry ring buffer, guarded by the same Bearer digest comparison as the tool endpoints. A record stores the search `query` or Fetch URL (truncated), status, duration, error code, final provider, `count`/`need_content`, result count and the first five result titles/URLs, but never response bodies, headers or credentials. Unauthenticated probes are excluded so they cannot flush the buffer; they remain in stderr logs. The panel page itself contains no data, the key stays in the browser's `sessionStorage`, and the buffer is lost on restart. No volume, database, new secret or new configuration key is introduced.
+
+**Panel key bootstrap.** An `#apikey=<key>` fragment logs the panel in directly for bookmark use. Only the fragment is accepted: it is never sent to the server and never appears in `Referer`, and the script removes exactly that parameter from the address bar and history via `history.replaceState` before the first request. Remaining unrelated anchor parameters survive, and query-string authentication is deliberately not supported. A wrong key returns to the login form without persisting anything.
+
 **Lifecycle.** `DefaultHttpTransport` gains `close`/`destroy`; the `HttpTransport` interface still requires only `request`. The entry stops readiness and admission first, waits up to 10 seconds, then cancels work, closes connections and the dispatcher.
 
 ## Consequences
 
-Clients speaking the DeepSeek tool protocol can use the configured providers through one authenticated LAN endpoint, with deterministic error mapping and bounded content backfill cost. The gateway is not a search-quality or ranking substitute: placeholder scores and snippet-reused summaries are protocol compatibility only. Backfill spends extract provider quota, is best-effort, and is capped by several independent budgets. The trusted-LAN assumption is load-bearing; exposing the gateway to untrusted clients requires a separate allowlist/SSRF decision.
+Clients speaking the DeepSeek tool protocol can use the configured providers through one authenticated LAN endpoint, with deterministic error mapping and bounded content backfill cost. The gateway is not a search-quality or ranking substitute: placeholder scores and snippet-reused summaries are protocol compatibility only. Backfill spends extract provider quota, is best-effort, and is capped by several independent budgets. The trusted-LAN assumption is load-bearing; exposing the gateway to untrusted clients requires a separate allowlist/SSRF decision. The records panel is an operator convenience rather than an audit log: entries are volatile and inherit the sensitivity of queries and target URLs, so anyone holding the gateway key can read them.
 
 ## Related
 

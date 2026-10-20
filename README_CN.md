@@ -284,6 +284,8 @@ node dist/server.js
 | --- | --- | --- |
 | `POST` | `/v1/tools/search` | DeepSeek Search 兼容 |
 | `POST` | `/v1/tools/fetch` | DeepSeek Fetch 兼容 |
+| `GET` | `/`、`/panel` | 请求记录面板（HTML，页面本身不含数据） |
+| `GET` | `/admin/api/records` | 最近请求记录（需要 Bearer Key） |
 | `GET` | `/healthz` | 进程存活，无需鉴权 |
 | `GET` | `/readyz` | 配置/生命周期就绪，无需鉴权 |
 
@@ -312,6 +314,8 @@ Fetch 只接受非空、最长 8192 字符、含 hostname、无 userinfo 的绝�
 错误统一为 `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`：400 输入错误、401 `invalid_api_key`、402 额度不足、404 无可用正文或直连目标不可用、408 读取请求体超时、413 请求体过大、429 限流（带 `Retry-After`）、504 下游超时、500 凭据/配置/未知失败/输出超限。目标站点的 401/403 属于 Fetch 不可用；云 provider 的 401/403 返回 500。
 
 网关不写回 provider 顺序，也不修改配置：服务运行期间使用启动时加载的配置快照。部署方式、Docker Compose 模板、secret 挂载、诊断、升级与回滚见 [deploy/README.md](deploy/README.md)；架构决策见 [docs/adr/0019-deepseek-tool-gateway.md](docs/adr/0019-deepseek-tool-gateway.md)。
+
+浏览器打开网关根路径或 `/panel`，输入网关 Key 即可查看最近 500 条工具请求（状态、耗时、错误码、provider、query/URL 与前 5 条结果标题）。记录只保存在内存中，重启清空，不记录响应正文、header 或凭据；未鉴权请求不进入记录。面板 HTML 本身不含数据，`/admin/api/records` 复用同一个 Bearer Key。也可用 `#apikey=<key>` 片段直接打开，脚本读取后立即从地址栏移除；不要用查询串传递 Key。
 
 ## HTTP 与安全边界
 

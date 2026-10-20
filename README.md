@@ -284,6 +284,8 @@ node dist/server.js
 | --- | --- | --- |
 | `POST` | `/v1/tools/search` | DeepSeek Search compatible |
 | `POST` | `/v1/tools/fetch` | DeepSeek Fetch compatible |
+| `GET` | `/`, `/panel` | Request records panel (HTML, no data in the page itself) |
+| `GET` | `/admin/api/records` | Recent request records (requires the Bearer key) |
 | `GET` | `/healthz` | Process liveness, no authentication |
 | `GET` | `/readyz` | Configuration/lifecycle readiness, no authentication |
 
@@ -312,6 +314,8 @@ The gateway derives its own config for Fetch and backfill with a 1-character min
 Errors are always `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`: 400 invalid input, 401 `invalid_api_key`, 402 insufficient quota, 404 no usable content or an unavailable direct target, 408 body read timeout, 413 body too large, 429 rate limited (with `Retry-After`), 504 upstream timeout, and 500 for credential/configuration failures, unknown failures or oversized output. Target-site 401/403 means Fetch is unavailable; cloud-provider 401/403 returns 500.
 
 The gateway never writes provider order and never modifies configuration: it uses the snapshot loaded at startup. Deployment, Docker Compose templates, secret mounts, diagnostics, upgrades and rollback are documented in [deploy/README.md](deploy/README.md); the architectural decision is in [docs/adr/0019-deepseek-tool-gateway.md](docs/adr/0019-deepseek-tool-gateway.md).
+
+Open the gateway root or `/panel` in a browser and enter the gateway key to inspect the last 500 tool requests (status, duration, error code, provider, query/URL and the first five result titles). Records are in memory only, are cleared on restart, and never contain response bodies, headers or credentials; unauthenticated requests are excluded. The panel HTML carries no data, and `/admin/api/records` uses the same Bearer key as the tool endpoints. A bookmark with an `#apikey=<key>` fragment logs in directly; the script strips it from the address bar immediately. Do not pass the key in a query string.
 
 ## HTTP and security boundaries
 

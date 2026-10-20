@@ -245,6 +245,35 @@ try {
 	assert.equal(missing.status, 404);
 	assert.equal(missing.body.error?.code, "no_usable_content");
 
+	// Request panel: the HTML is public but the records API needs the key.
+	const panel = await fetch(`${baseUrl}/panel`);
+	assert.equal(panel.status, 200);
+	assert.match(panel.headers.get("content-type") ?? "", /text\/html/);
+	const panelHtml = await panel.text();
+	assert.match(panelHtml, /Web Access 网关/);
+	assert.doesNotMatch(panelHtml, new RegExp(gatewayKey));
+	const anonymousRecords = await fetch(`${baseUrl}/admin/api/records`);
+	assert.equal(anonymousRecords.status, 401);
+	await anonymousRecords.text();
+	const recordsResponse = await fetch(`${baseUrl}/admin/api/records`, {
+		headers: { Authorization: `Bearer ${gatewayKey}` },
+	});
+	assert.equal(recordsResponse.status, 200);
+	const recordsBody = await recordsResponse.json();
+	assert.equal(recordsBody.retention, 500);
+	assert.ok(Array.isArray(recordsBody.records));
+	assert.ok(
+		recordsBody.records.some(
+			(record) => record.route === "search" && record.query === "fixture",
+		),
+	);
+	assert.ok(
+		recordsBody.records.some(
+			(record) =>
+				record.route === "fetch" && record.title === "Fixture Article",
+		),
+	);
+
 	// Restart the gateway alone and verify recovery.
 	const restart = await compose(["restart", "gateway"], { inherit: true });
 	assert.equal(restart.code, 0, "restart 失败");

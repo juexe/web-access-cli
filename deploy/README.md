@@ -22,6 +22,8 @@ deploy/
 | --- | --- | --- |
 | `POST` | `/v1/tools/search` | DeepSeek Search 兼容 |
 | `POST` | `/v1/tools/fetch` | DeepSeek Fetch 兼容 |
+| `GET` | `/`、`/panel` | 请求记录面板（HTML，无需鉴权，页面本身不含数据） |
+| `GET` | `/admin/api/records` | 最近请求记录 JSON（需要 Bearer Key） |
 | `GET` | `/healthz` | 进程存活，无需鉴权 |
 | `GET` | `/readyz` | 配置/生命周期就绪，无需鉴权 |
 
@@ -128,6 +130,17 @@ curl -sS -X POST http://192.168.3.3:18180/v1/tools/search \
 ```
 
 `deploy/compose.yaml` 默认把端口发布到 `127.0.0.1:18180`，此时只能从宿主机访问。需要从局域网访问时，把 `WEB_ACCESS_BIND` 设为 `192.168.3.3:18180`（只写端口部分，容器内端口固定为 8080）。
+
+## 请求记录面板
+
+浏览器打开 `http://192.168.3.3:18180/panel`（或直接打开 `/`），输入网关 API Key 即可查看最近的工具请求。页面每 3 秒自动刷新，可按搜索/抓取、成功/失败和文本筛选。
+
+- 只保留最近 500 条，进程或容器重启后清空；记录只在内存中，不写磁盘，因此 `read_only` 容器不需要额外卷。
+- 每条记录包含时间、route、HTTP 状态、耗时、错误码、最终成功的 provider（失败时为最后一个实际失败的 provider）、搜索 `query` 或 Fetch URL、`count`/`need_content`、结果条数，以及前 5 条结果的标题和 URL。
+- 不记录响应正文、请求/响应 header 或凭据。只有通过鉴权的工具请求才进入面板；401 等未鉴权请求只写入容器 stderr 日志，避免探测流量冲刷记录。
+- 面板 HTML 本身是公开的静态页面，不含数据；`/admin/api/records` 与工具接口使用同一个 Bearer Key。Key 由浏览器保存在当前标签页的 `sessionStorage`，不进入 URL、不写 Cookie。
+- 可以直接用书签链接 `http://192.168.3.3:18180/panel#apikey=<key>` 打开：Key 放在 fragment 中，不会发送给服务器，也不出现在 `Referer`；脚本读到后会立刻从地址栏和历史记录中移除它，并写入 sessionStorage。**不要用 `?apikey=`**，查询串会进入服务器日志、代理日志和浏览器历史。
+- 记录包含 `query` 与 URL，属于敏感信息；能拿到网关 Key 的人都能读取，与调用搜索接口的信任边界一致。不要把面板或 Key 暴露到可信内网之外。
 
 ## 环境变量
 

@@ -1,4 +1,9 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+	createHash,
+	randomBytes,
+	randomUUID,
+	timingSafeEqual,
+} from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
 	createServer,
@@ -8,7 +13,18 @@ import {
 } from "node:http";
 import type { LoadedConfig } from "../config/config.ts";
 import type { HttpTransport } from "../transport/http.ts";
+import { VERSION } from "../version.ts";
+import { PANEL_PATH, RECORDS_PATH, renderPanelHtml } from "./panel.ts";
 import {
+	createGatewayRecordStore,
+	GATEWAY_RECORD_MAX_RESULTS,
+	type GatewayRecordResult,
+} from "./records.ts";
+import {
+	type GatewayFetchRequest,
+	type GatewayFetchResponse,
+	type GatewaySearchRequest,
+	type GatewaySearchResponse,
 	GatewayValidationError,
 	parseGatewayFetchRequest,
 	parseGatewaySearchRequest,
@@ -49,6 +65,8 @@ export interface GatewayServerOptions {
 	/** Test-only override of the inbound body limit and read timeout. */
 	maxBodyBytes?: number;
 	bodyTimeoutMs?: number;
+	/** Test-only override of the in-memory request record retention. */
+	recordLimit?: number;
 	/** Structured logger; never receives request bodies or credentials. */
 	log?: (event: GatewayLogEvent) => void;
 }
@@ -129,6 +147,38 @@ function sendError(
 			...headers,
 		},
 	);
+}
+
+function sendPanel(
+	response: ServerResponse,
+	nonce: string,
+	retention: number,
+): void {
+	if (response.writableEnded || response.destroyed) return;
+	const body = renderPanelHtml({
+		nonce,
+		retention,
+		minKeyLength: GATEWAY_MIN_API_KEY_LENGTH,
+		version: VERSION,
+	});
+	response.writeHead(200, {
+		"Content-Type": "text/html; charset=utf-8",
+		"Cache-Control": "no-store",
+		"Content-Length": Buffer.byteLength(body, "utf8").toString(),
+		"Content-Security-Policy": [
+			"default-src 'none'",
+			`script-src 'nonce-${nonce}'`,
+			`style-src 'nonce-${nonce}'`,
+			"connect-src 'self'",
+			"img-src 'none'",
+			"base-uri 'none'",
+			"form-action 'none'",
+			"frame-ancestors 'none'",
+		].join("; "),
+		"Referrer-Policy": "no-referrer",
+		"X-Content-Type-Options": "nosniff",
+	});
+	response.end(body);
 }
 
 const invalidRequest = (message: string): GatewayHttpError =>
@@ -287,6 +337,7 @@ export function createGatewayServer(
 		limits: options.limits,
 	});
 	const expected = digest(options.apiKey);
+	const records = createGatewayRecordStore(options.recordLimit);
 	const maxBodyBytes = options.maxBodyBytes ?? GATEWAY_MAX_BODY_BYTES;
 	const bodyTimeoutMs = options.bodyTimeoutMs ?? GATEWAY_BODY_TIMEOUT_MS;
 	const log =
@@ -296,6 +347,13 @@ export function createGatewayServer(
 	let inFlight = 0;
 	let shuttingDown = false;
 	const active = new Set<ServerResponse>();
+
+	const authenticate = (request: IncomingMessage): boolean => {
+		const providedKey = authorizationKey(request);
+		return (
+			providedKey.length > 0 && timingSafeEqual(digest(providedKey), expected)
+		);
+	};
 
 	const handle = async (
 		request: IncomingMessage,
@@ -311,6 +369,18 @@ export function createGatewayServer(
 				: randomUUID();
 		let status = 500;
 		let code: string | undefined;
+		let authenticated = false;
+		let clientAborted = false;
+		const summary: {
+			query?: string;
+			url?: string;
+			count?: number;
+			needContent?: boolean;
+			provider?: string;
+			title?: string;
+			resultCount?: number;
+			results?: GatewayRecordResult[];
+		} = {};
 		const clientAbort = new AbortController();
 		response.once("close", () => {
 			if (!response.writableEnded) clientAbort.abort();
@@ -323,11 +393,8 @@ export function createGatewayServer(
 					code: "shutting_down",
 					message: "网关正在停止。",
 				});
-			const providedKey = authorizationKey(request);
-			const authenticated =
-				providedKey.length > 0 &&
-				timingSafeEqual(digest(providedKey), expected);
-			if (!authenticated) throw unauthorized();
+			if (!authenticate(request)) throw unauthorized();
+			authenticated = true;
 			if (!contentTypeIsJson(request.headers["content-type"]))
 				throw invalidRequest("Content-Type 必须是 application/json。");
 			if (request.headers["content-encoding"] !== undefined)
@@ -347,19 +414,54 @@ export function createGatewayServer(
 					route === "search"
 						? parseGatewaySearchRequest(raw)
 						: parseGatewayFetchRequest(raw);
+				if (route === "search") {
+					const search = parsed as GatewaySearchRequest;
+					summary.query = search.query;
+					summary.count = search.count;
+					summary.needContent = search.need_content ?? false;
+				} else {
+					summary.url = (parsed as GatewayFetchRequest).url;
+				}
+				const observer = {
+					onSuccess: (info: { provider: string }) => {
+						summary.provider = info.provider;
+					},
+				};
 				const body: unknown =
 					route === "search"
-						? await service.search(parsed as never, clientAbort.signal)
-						: await service.fetch(parsed as never, clientAbort.signal);
-				if (clientAbort.signal.aborted || response.writableEnded) return;
+						? await service.search(
+								parsed as never,
+								clientAbort.signal,
+								observer,
+							)
+						: await service.fetch(
+								parsed as never,
+								clientAbort.signal,
+								observer,
+							);
+				if (clientAbort.signal.aborted || response.writableEnded) {
+					clientAborted = true;
+					return;
+				}
+				if (route === "search") {
+					const searchBody = body as GatewaySearchResponse;
+					summary.resultCount = searchBody.results.length;
+					summary.results = searchBody.results
+						.slice(0, GATEWAY_RECORD_MAX_RESULTS)
+						.map((result) => ({ title: result.title, url: result.url }));
+				} else {
+					summary.title = (body as GatewayFetchResponse).title;
+				}
 				status = 200;
 				sendJson(response, 200, body);
 			} finally {
 				inFlight -= 1;
 			}
 		} catch (error) {
-			if (error instanceof GatewayClientAbort || clientAbort.signal.aborted)
+			if (error instanceof GatewayClientAbort || clientAbort.signal.aborted) {
+				clientAborted = true;
 				return;
+			}
 			const mapped: GatewayHttpError =
 				error instanceof GatewayValidationError
 					? invalidRequest(error.message)
@@ -379,6 +481,7 @@ export function createGatewayServer(
 										});
 			status = mapped.status;
 			code = mapped.code;
+			summary.provider = summary.provider ?? mapped.provider;
 			// Body limits and timeouts close the connection after the error envelope.
 			const closeConnection =
 				error instanceof BodyTooLarge ||
@@ -391,14 +494,29 @@ export function createGatewayServer(
 			);
 			if (closeConnection) request.destroy();
 		} finally {
+			const durationMs = Math.max(0, Math.round(performance.now() - started));
 			log({
 				method: request.method ?? "",
 				route,
 				status,
-				durationMs: Math.max(0, Math.round(performance.now() - started)),
+				durationMs,
 				requestId,
 				...(code ? { code } : {}),
 			});
+			// The panel is an observability surface, not another log sink: only
+			// authenticated tool requests are retained, so unauthenticated probes
+			// cannot flush the ring buffer and failed keys stay in stderr logs.
+			if (authenticated && !clientAborted) {
+				records.add({
+					id: requestId,
+					at: Date.now(),
+					route,
+					status,
+					durationMs,
+					...(code ? { code } : {}),
+					...summary,
+				});
+			}
 		}
 	};
 
@@ -428,6 +546,55 @@ export function createGatewayServer(
 					? { status: "ready" }
 					: { status: "not_ready", reason: readiness.reason },
 			);
+			return;
+		}
+		if (path === "/" || path === PANEL_PATH) {
+			if (request.method !== "GET") {
+				sendError(response, methodNotAllowed("GET"), { Allow: "GET" });
+				return;
+			}
+			sendPanel(
+				response,
+				randomBytes(16).toString("base64url"),
+				records.retention,
+			);
+			return;
+		}
+		if (path === RECORDS_PATH) {
+			if (request.method !== "GET") {
+				sendError(response, methodNotAllowed("GET"), { Allow: "GET" });
+				return;
+			}
+			if (!authenticate(request)) {
+				sendError(response, unauthorized());
+				return;
+			}
+			const queryIndex = url.indexOf("?");
+			const params = new URLSearchParams(
+				queryIndex === -1 ? "" : url.slice(queryIndex + 1),
+			);
+			const rawLimit = params.get("limit");
+			let limit = records.retention;
+			if (rawLimit !== null) {
+				if (
+					!/^[1-9]\d{0,3}$/.test(rawLimit) ||
+					Number(rawLimit) > records.retention
+				) {
+					sendError(
+						response,
+						invalidRequest(`limit 必须是 1–${records.retention} 的整数。`),
+					);
+					return;
+				}
+				limit = Number(rawLimit);
+			}
+			const list = records.list(limit);
+			sendJson(response, 200, {
+				records: list,
+				count: list.length,
+				retention: records.retention,
+				generatedAt: Date.now(),
+			});
 			return;
 		}
 		if (path === "/v1/tools/search" || path === "/v1/tools/fetch") {
