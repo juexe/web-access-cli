@@ -77,8 +77,8 @@ deploy/
 
 - 按结果排名顺序调度，最多两路并发，总预算 30 秒，单篇最多 10 秒。
 - 补抓阶段每次 provider 尝试最多 3 秒，让失败后还有机会尝试其他 provider。这是尽力补抓的取舍。
-- 失败、超时、未调度完成或超限的正文一律留空，结果本身保留。
-- 单篇正文的 JSON 编码后 UTF-8 大小最多 256 KiB；完整响应最多 8 MiB，超限时从低排名起清空 `content`；仍超限则返回固定的小型 500，不截断正文也不丢结果。
+- 失败、超时或未调度完成的正文一律留空，结果本身保留。
+- 补抓正文与完整响应都**不设大小上限**，长页面原样返回。
 - **补抓会消耗 extract 上游额度。** `need_content` 请只在确实需要正文时开启。
 
 短正文：网关为 Fetch 和补抓派生了自己的配置，正文最短阈值降为 1 个字符，因此有效的短页面会成功。但源站 `.md` 猜测仍要求至少 500 字符（或原配置阈值，取较大者），避免短小的 `Not found` 页面误命中。
@@ -91,13 +91,13 @@ deploy/
 | 网关 Bearer 缺失、无效或重复 | 401 | `authentication_error` / `invalid_api_key` |
 | 云 provider 额度不足 | 402 | `insufficient_quota` / `insufficient_quota` |
 | Fetch 无可用正文、类型不支持、直连目标不可用 | 404 | `not_found_error` / `no_usable_content` |
-| 读取请求体超时 | 408 | `timeout_error` / `request_timeout` |
-| 请求体超过限制 | 413 | `invalid_request_error` / `request_too_large` |
-| 本地并发满或上游限流 | 429 | `rate_limit_error` / `rate_limit_exceeded`（带 `Retry-After`） |
+| 上游 provider 限流 | 429 | `rate_limit_error` / `rate_limit_exceeded`（带 `Retry-After`） |
 | 下游超时 | 504 | `timeout_error` / `upstream_timeout` |
-| 云 provider 凭据/配置错误、无可用 provider、最终输出超限等 | 500 | `server_error` / 细分 code |
+| 云 provider 凭据/配置错误、无可用 provider 等 | 500 | `server_error` / 细分 code |
 | 未知路由 | 404 | `invalid_request_error` / `not_found` |
 | 已知接口错误方法 | 405 | `invalid_request_error` / `method_not_allowed`（带 `Allow`） |
+
+网关是私有单用户部署，**不设本地并发闸门、请求体大小上限或请求体读取超时**：并发只受上游 provider 与进程本身约束，入站请求不会再触发 413/408，也不会因网关自身并发返回 429（429 只来自上游 provider 限流）。
 
 目标站点的 401/403/404 属于 Fetch 不可用，不会误报为网关认证错误；云 provider 的 401/403 返回 500。
 

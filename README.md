@@ -291,7 +291,7 @@ node dist/server.js
 | `GET` | `/healthz` | Process liveness, no authentication |
 | `GET` | `/readyz` | Configuration/lifecycle readiness, no authentication |
 
-The gateway reads its own Bearer key from a file only (`WEB_ACCESS_GATEWAY_API_KEY_FILE`), compares fixed-length digests with Node crypto, and rejects duplicate `Authorization` headers. Request bodies are counted as a stream with a 64 KiB cap and a 10-second read timeout; at most four tool requests may be in flight, and excess requests receive 429. Success and error responses use `Cache-Control: no-store`.
+The gateway reads its own Bearer key from a file only (`WEB_ACCESS_GATEWAY_API_KEY_FILE`), compares fixed-length digests with Node crypto, and rejects duplicate `Authorization` headers. It is a private single-user deployment, so it applies **no local admission, body size or body read deadline**: concurrency is bounded only by the upstream providers and the process itself, and request bodies never return 413/408 or a gateway-generated 429. Success and error responses use `Cache-Control: no-store`.
 
 Request fields match the official contract:
 
@@ -309,11 +309,11 @@ Fetch accepts only a non-empty absolute HTTP(S) URL of at most 8192 characters w
 
 `ori_question` and `localization` are validated and accepted, but the neutral core has no equivalent capability, so they do not affect provider requests and are not folded into `query`.
 
-With `need_content=true`, content is backfilled in rank order with at most two concurrent tasks, a 30-second total window, 10 seconds per item, and a 3-second per-provider attempt cap. Failed, timed-out or over-limit content stays empty while the result is kept; one content value is capped at 256 KiB JSON-encoded UTF-8 and the complete response at 8 MiB, clearing content from the lowest ranks when needed. **Backfill spends extract provider quota.**
+With `need_content=true`, content is backfilled in rank order with at most two concurrent tasks, a 30-second total window, 10 seconds per item, and a 3-second per-provider attempt cap. Failed or timed-out content stays empty while the result is kept; backfilled content and complete responses have **no size cap**, so long pages are returned as-is. **Backfill spends extract provider quota.**
 
 The gateway derives its own config for Fetch and backfill with a 1-character minimum, so valid short pages succeed, while the source Markdown probe still requires at least 500 characters (or the original threshold, whichever is larger) so a short `Not found` page cannot win. Search and Fetch each use the configured total timeout; backfill has an independent 30-second window, and client disconnects cancel in-flight work.
 
-Errors are always `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`: 400 invalid input, 401 `invalid_api_key`, 402 insufficient quota, 404 no usable content or an unavailable direct target, 408 body read timeout, 413 body too large, 429 rate limited (with `Retry-After`), 504 upstream timeout, and 500 for credential/configuration failures, unknown failures or oversized output. Target-site 401/403 means Fetch is unavailable; cloud-provider 401/403 returns 500.
+Errors are always `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`: 400 invalid input, 401 `invalid_api_key`, 402 insufficient quota, 404 no usable content or an unavailable direct target, 504 upstream timeout, and 500 for credential/configuration failures or unknown failures. A 429 now only means the **upstream provider** rate-limited the request; the gateway no longer generates 429 for its own concurrency, and request bodies no longer produce 413/408. Target-site 401/403 means Fetch is unavailable; cloud-provider 401/403 returns 500.
 
 The gateway never writes provider order and never modifies configuration: it uses the snapshot loaded at startup. Deployment, Docker Compose templates, secret mounts, diagnostics, upgrades and rollback are documented in [deploy/README.md](deploy/README.md); the architectural decision is in [docs/adr/0019-deepseek-tool-gateway.md](docs/adr/0019-deepseek-tool-gateway.md).
 

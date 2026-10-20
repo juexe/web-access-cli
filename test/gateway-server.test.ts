@@ -10,7 +10,6 @@ import { request } from "undici";
 import { type LoadedConfig, loadConfig } from "../src/config/config.ts";
 import {
 	createGatewayServer,
-	GATEWAY_MAX_IN_FLIGHT,
 	GATEWAY_MIN_API_KEY_LENGTH,
 	type GatewayLogEvent,
 	type GatewayServer,
@@ -45,8 +44,6 @@ async function startServer(
 	options: {
 		config?: unknown;
 		transport?: MockTransport;
-		maxBodyBytes?: number;
-		bodyTimeoutMs?: number;
 		log?: (event: GatewayLogEvent) => void;
 	} = {},
 ): Promise<{
@@ -61,12 +58,6 @@ async function startServer(
 		loaded: fixture.loaded,
 		apiKey: API_KEY,
 		...(transport ? { transport } : {}),
-		...(options.maxBodyBytes !== undefined
-			? { maxBodyBytes: options.maxBodyBytes }
-			: {}),
-		...(options.bodyTimeoutMs !== undefined
-			? { bodyTimeoutMs: options.bodyTimeoutMs }
-			: {}),
 		...(options.log ? { log: options.log } : { log: () => {} }),
 	});
 	await new Promise<void>((resolveListen) => {
@@ -311,7 +302,7 @@ test("请求方法、未知路由与 Content-Type 契约", async (t) => {
 	}
 });
 
-test("并发满时返回 429 与 Retry-After", async (t) => {
+test("并发不再受限：超过旧上限的并发请求全部成功", async (t) => {
 	const { MockTransport } = await import("./helpers.ts");
 	let release: (() => void) | undefined;
 	const gate = new Promise<void>((resolveGate) => {
@@ -327,7 +318,7 @@ test("并发满时返回 429 与 Retry-After", async (t) => {
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${API_KEY}`,
 		};
-		const pending = Array.from({ length: GATEWAY_MAX_IN_FLIGHT }, () =>
+		const pending = Array.from({ length: 12 }, () =>
 			request(`${server.url}/v1/tools/search`, {
 				method: "POST",
 				headers,
@@ -335,13 +326,6 @@ test("并发满时返回 429 与 Retry-After", async (t) => {
 			}),
 		);
 		await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-		const rejected = await request(`${server.url}/v1/tools/search`, {
-			method: "POST",
-			headers,
-			body: searchBody(),
-		});
-		assert.equal(rejected.statusCode, 429);
-		assert.equal(rejected.headers["retry-after"], "1");
 		release?.();
 		const results = await Promise.all(pending);
 		for (const result of results) {
@@ -354,44 +338,36 @@ test("并发满时返回 429 与 Retry-After", async (t) => {
 	}
 });
 
-test("请求体超限返回 413，读取超时返回 408", async (t) => {
+test("请求体不设大小上限", async (t) => {
 	const { MockTransport } = await import("./helpers.ts");
 	const transport = new MockTransport(() => response({ web: { results: [] } }));
-	const server = await startServer(t, {
-		transport,
-		maxBodyBytes: 1024,
-		bodyTimeoutMs: 200,
-	});
+	const server = await startServer(t, { transport });
 	try {
+		// Unknown fields are ignored by the protocol, so this only exercises the
+		// inbound body size: 2 MiB is far beyond the former 64 KiB cap.
 		const oversized = await request(`${server.url}/v1/tools/search`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${API_KEY}`,
 			},
-			body: JSON.stringify({ query: "x".repeat(2000) }),
+			body: searchBody({ padding: "x".repeat(2 * 1024 * 1024) }),
 		});
-		assert.equal(oversized.statusCode, 413);
-		const body = (await oversized.body.json()) as {
-			error: { type: string; code: string };
-		};
-		assert.equal(body.error.type, "invalid_request_error");
-		assert.equal(body.error.code, "request_too_large");
+		assert.equal(oversized.statusCode, 200);
+		await oversized.body.text();
 	} finally {
 		await server.close();
 	}
 });
 
-test("慢请求体在读取超时后返回 408", async (t) => {
+test("慢速请求体不再触发读取超时", async (t) => {
 	const { MockTransport } = await import("./helpers.ts");
 	const transport = new MockTransport(() => response({ web: { results: [] } }));
-	const server = await startServer(t, {
-		transport,
-		bodyTimeoutMs: 150,
-	});
+	const server = await startServer(t, { transport });
 	try {
 		const url = new URL(server.url);
 		const net = await import("node:net");
+		const payload = '{"query":"slow"}';
 		const responseText = await new Promise<string>(
 			(resolveText, rejectText) => {
 				const socket = new net.Socket();
@@ -403,14 +379,17 @@ test("慢请求体在读取超时后返回 408", async (t) => {
 							`Host: ${url.host}`,
 							"Content-Type: application/json",
 							`Authorization: Bearer ${API_KEY}`,
-							"Content-Length: 1000",
+							`Content-Length: ${Buffer.byteLength(payload, "utf8")}`,
 							"Connection: close",
 							"",
 							"",
 						].join("\r\n"),
 					);
-					// Send a partial body and then stop writing entirely.
-					socket.write('{"query":');
+					// Send a partial body, then stall past the former 10-second
+					// read deadline before finishing it.
+					const split = payload.indexOf("slow");
+					socket.write(payload.slice(0, split));
+					setTimeout(() => socket.write(payload.slice(split)), 10_300);
 				});
 				socket.setEncoding("utf8");
 				socket.on("data", (chunk: string) => {
@@ -421,11 +400,11 @@ test("慢请求体在读取超时后返回 408", async (t) => {
 				setTimeout(() => {
 					socket.destroy();
 					resolveText(data);
-				}, 2000).unref();
+				}, 14_000).unref();
 			},
 		);
-		assert.match(responseText, /^HTTP\/1\.1 408/);
-		assert.match(responseText, /request_timeout/);
+		assert.match(responseText, /^HTTP\/1\.1 200/);
+		assert.doesNotMatch(responseText, /request_timeout/);
 	} finally {
 		await server.close();
 	}

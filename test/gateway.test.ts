@@ -595,8 +595,9 @@ test("补抓单次 provider 尝试不超过 3 秒上限", async () => {
 	}
 });
 
-test("补抓内容超过 256 KiB 留空", async () => {
+test("补抓正文不再受 256 KiB 上限截断", async () => {
 	const fixture = loadedConfig(searchConfig);
+	const big = "正文".repeat(60_000);
 	try {
 		const transport = new MockTransport((url) => {
 			if (url.includes("brave")) {
@@ -615,7 +616,7 @@ test("补抓内容超过 256 KiB 留空", async () => {
 			}
 			if (url.endsWith(".md")) return response("missing", { status: 404 });
 			if (url.endsWith("/big"))
-				return response("正文".repeat(60_000), { contentType: "text/plain" });
+				return response(big, { contentType: "text/plain" });
 			return response("小正文", { contentType: "text/plain" });
 		});
 		const service = createGatewayService(
@@ -625,18 +626,18 @@ test("补抓内容超过 256 KiB 留空", async () => {
 			parseGatewaySearchRequest({ query: "hello", need_content: true }),
 			new AbortController().signal,
 		);
-		assert.equal(body.results[0]?.content, "");
+		assert.equal(body.results[0]?.content, big);
 		assert.equal(body.results[1]?.content, "小正文");
 	} finally {
 		fixture.cleanup();
 	}
 });
 
-test("最终响应超过 8 MiB 时从低排名起清空补抓正文", async () => {
+test("超大响应不再被裁剪也不再返回 response_too_large", async () => {
 	const fixture = loadedConfig(searchConfig);
 	try {
 		const transport = new MockTransport((url) => {
-			if (url.includes("brave")) {
+			if (url.includes("brave"))
 				return response({
 					web: {
 						results: [
@@ -645,98 +646,19 @@ test("最终响应超过 8 MiB 时从低排名起清空补抓正文", async () =
 						],
 					},
 				});
-			}
 			if (url.endsWith(".md")) return response("missing", { status: 404 });
 			return response("x".repeat(150 * 1024), { contentType: "text/plain" });
 		});
 		const service = createGatewayService(
-			serviceOptions(fixture.loaded, transport, {
-				responseMaxBytes: 200 * 1024,
-			}),
+			serviceOptions(fixture.loaded, transport),
 		);
 		const body = await service.search(
 			parseGatewaySearchRequest({ query: "hello", need_content: true }),
 			new AbortController().signal,
 		);
 		assert.equal(body.results.length, 2);
-		assert.equal(body.results[1]?.content, "");
-		assert.ok((body.results[0]?.content ?? "").length > 0);
-	} finally {
-		fixture.cleanup();
-	}
-});
-
-test("剔除补抓正文后仍超限时返回固定 500", async () => {
-	const fixture = loadedConfig(searchConfig);
-	try {
-		const snippet = "s".repeat(600);
-		const transport = new MockTransport((url) => {
-			if (url.includes("brave")) {
-				return response({
-					web: {
-						results: [
-							{
-								title: "A",
-								url: "https://example.com/a",
-								description: snippet,
-							},
-						],
-					},
-				});
-			}
-			if (url.endsWith(".md")) return response("missing", { status: 404 });
-			return response("<p>short</p>", { contentType: "text/html" });
-		});
-		const service = createGatewayService(
-			serviceOptions(fixture.loaded, transport, { responseMaxBytes: 512 }),
-		);
-		const error = await expectHttpError(
-			() =>
-				service.search(
-					parseGatewaySearchRequest({ query: "hello", need_content: true }),
-					new AbortController().signal,
-				),
-			500,
-			"response_too_large",
-		);
-		assert.equal(error.type, "server_error");
-	} finally {
-		fixture.cleanup();
-	}
-});
-
-test("JSON 转义膨胀同样计入最终大小限制", async () => {
-	const fixture = loadedConfig(searchConfig);
-	try {
-		// 100 quoted newlines become 4 bytes each after JSON escaping.
-		const awkward = '"\\\n\t'.repeat(100);
-		const transport = new MockTransport((url) => {
-			if (url.includes("brave"))
-				return response({
-					web: {
-						results: [
-							{
-								title: "A",
-								url: "https://example.com/a",
-								description: awkward,
-							},
-						],
-					},
-				});
-			return response("short", { contentType: "text/plain" });
-		});
-		const service = createGatewayService(
-			serviceOptions(fixture.loaded, transport, { responseMaxBytes: 550 }),
-		);
-		await expectHttpError(
-			() =>
-				service.search(
-					parseGatewaySearchRequest({ query: "hello" }),
-					new AbortController().signal,
-				),
-			500,
-			"response_too_large",
-		);
+		assert.equal((body.results[0]?.content ?? "").length, 150 * 1024);
+		assert.equal((body.results[1]?.content ?? "").length, 150 * 1024);
 	} finally {
 		fixture.cleanup();
 	}
@@ -1105,25 +1027,22 @@ test("Fetch 失败 partial 不升级为成功", async () => {
 	}
 });
 
-test("Fetch 输出超过 8 MiB 返回固定 500", async () => {
+test("Fetch 输出不设大小上限", async () => {
 	const fixture = loadedConfig(searchConfig);
+	const big = "x".repeat(1024 * 1024);
 	try {
 		const transport = new MockTransport((url) => {
 			if (url.endsWith(".md")) return response("missing", { status: 404 });
-			return response("x".repeat(64 * 1024), { contentType: "text/plain" });
+			return response(big, { contentType: "text/plain" });
 		});
 		const service = createGatewayService(
-			serviceOptions(fixture.loaded, transport, { responseMaxBytes: 1024 }),
+			serviceOptions(fixture.loaded, transport),
 		);
-		await expectHttpError(
-			() =>
-				service.fetch(
-					parseGatewayFetchRequest({ url: "https://example.com/big" }),
-					new AbortController().signal,
-				),
-			500,
-			"response_too_large",
+		const responseBody = await service.fetch(
+			parseGatewayFetchRequest({ url: "https://example.com/big" }),
+			new AbortController().signal,
 		);
+		assert.equal(responseBody.content, big);
 	} finally {
 		fixture.cleanup();
 	}

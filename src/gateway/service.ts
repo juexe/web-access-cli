@@ -31,10 +31,6 @@ export const GATEWAY_DEFAULT_LIMITS: GatewayLimits = {
 	contentPreflightTimeoutMs: 1_000,
 	/** Minimum probe body size; short soft-404 pages must not win. */
 	contentPreflightMinCharacters: 500,
-	/** JSON-encoded UTF-8 size cap for one backfilled `content` value. */
-	contentMaxBytes: 256 * 1024,
-	/** JSON-encoded UTF-8 size cap for a complete success response. */
-	responseMaxBytes: 8 * 1024 * 1024,
 };
 
 export interface GatewayLimits {
@@ -43,8 +39,6 @@ export interface GatewayLimits {
 	contentAttemptTimeoutMs: number;
 	contentPreflightTimeoutMs: number;
 	contentPreflightMinCharacters: number;
-	contentMaxBytes: number;
-	responseMaxBytes: number;
 }
 
 export interface GatewayServiceOptions {
@@ -120,7 +114,6 @@ const ERROR_MESSAGES: Record<string, string> = {
 	provider_auth_error: "上游 provider 凭据无效。",
 	provider_config_error: "上游 provider 配置无效。",
 	no_provider_available: "没有可用的 provider。",
-	response_too_large: "响应超过网关大小限制。",
 	provider_error: "上游 provider 请求失败。",
 };
 
@@ -168,10 +161,6 @@ function notFoundError(): GatewayHttpError {
 		code: "no_usable_content",
 		message: ERROR_MESSAGES.no_usable_content as string,
 	});
-}
-
-function jsonBytes(value: unknown): number {
-	return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
 function deriveExtractConfig(
@@ -425,8 +414,7 @@ export function createGatewayService(
 					)
 						continue;
 					const content = document.content;
-					if (jsonBytes(content) <= limits.contentMaxBytes)
-						contents[index] = content;
+					contents[index] = content;
 				} catch {
 					// Best-effort backfill: failures leave the content empty.
 				} finally {
@@ -436,20 +424,6 @@ export function createGatewayService(
 		};
 		await Promise.all([worker(), worker()]);
 		return contents;
-	}
-
-	function enforceSearchSize(results: GatewaySearchResult[]): void {
-		if (jsonBytes({ results }) <= limits.responseMaxBytes) return;
-		for (let index = results.length - 1; index >= 0; index--) {
-			const result = results[index];
-			if (!result || result.content === "") continue;
-			result.content = "";
-			if (jsonBytes({ results }) <= limits.responseMaxBytes) return;
-		}
-		throw serverError(
-			"response_too_large",
-			"响应在清空补抓正文后仍超过网关大小限制。",
-		);
 	}
 
 	return {
@@ -493,11 +467,7 @@ export function createGatewayService(
 				observer?.onSuccess?.({ provider: envelope.provider });
 			const hits = data.results;
 			const results = hits.map(mapHit);
-			if (!request.need_content || results.length === 0) {
-				// Size limits apply to every response, including content-free ones.
-				enforceSearchSize(results);
-				return { results };
-			}
+			if (!request.need_content || results.length === 0) return { results };
 			if (clientSignal.aborted) throw new GatewayClientAbort();
 			const backfillDeadline = now() + limits.contentBudgetMs;
 			const backfillTimeout = new AbortController();
@@ -521,7 +491,6 @@ export function createGatewayService(
 			// budget; it must not expire the independent backfill window.
 			for (const [index, result] of results.entries())
 				result.content = contents[index] ?? "";
-			enforceSearchSize(results);
 			return { results };
 		},
 
@@ -562,8 +531,6 @@ export function createGatewayService(
 				title: document.title ?? "",
 				content: document.content,
 			};
-			if (jsonBytes(response) > limits.responseMaxBytes)
-				throw serverError("response_too_large", "Fetch 响应超过网关大小限制。");
 			return response;
 		},
 	};

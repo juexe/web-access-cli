@@ -291,7 +291,7 @@ node dist/server.js
 | `GET` | `/healthz` | 进程存活，无需鉴权 |
 | `GET` | `/readyz` | 配置/生命周期就绪，无需鉴权 |
 
-网关只从文件读取独立的 Bearer Key（`WEB_ACCESS_GATEWAY_API_KEY_FILE`），使用 Node crypto 做定长摘要比较，并拒绝重复 `Authorization`。入站请求体按流计数，上限 64 KiB，读取超时 10 秒；全服务最多 4 个在途工具请求，满额返回 429。成功与错误都使用 `Cache-Control: no-store`。
+网关只从文件读取独立的 Bearer Key（`WEB_ACCESS_GATEWAY_API_KEY_FILE`），使用 Node crypto 做定长摘要比较，并拒绝重复 `Authorization`。网关是私有单用户部署，**不设本地并发闸门、请求体大小上限或请求体读取超时**：并发只受上游 provider 与进程本身约束，入站请求体不再返回 413/408，也不会因并发满返回 429。成功与错误都使用 `Cache-Control: no-store`。
 
 请求字段与官方一致：
 
@@ -309,11 +309,11 @@ Fetch 只接受非空、最长 8192 字符、含 hostname、无 userinfo 的绝�
 
 `ori_question` 与 `localization` 本期接受并校验，但中立核心没有对应能力，因此不影响 provider 请求，也不会拼进 `query`。
 
-`need_content=true` 时为每条结果补抓正文：按排名顺序、最多两路并发、总预算 30 秒、单篇 10 秒、每次 provider 尝试 3 秒。失败、超时或超限的正文留空但结果保留；单篇正文最多 256 KiB（JSON 编码后），完整响应最多 8 MiB，超限时从低排名起清空 `content`。**补抓会消耗 extract 上游额度。**
+`need_content=true` 时为每条结果补抓正文：按排名顺序、最多两路并发、总预算 30 秒、单篇 10 秒、每次 provider 尝试 3 秒。失败或超时的正文留空但结果保留；补抓正文与完整响应都**不设大小上限**，超长页面原样返回。**补抓会消耗 extract 上游额度。**
 
 网关为 Fetch 与补抓派生自己的配置，正文最短阈值降为 1 个字符，因此有效短页面会成功；源站 `.md` 猜测仍要求至少 500 字符（或原配置阈值取大者），避免短小的 `Not found` 页面误命中。搜索和 Fetch 各用现有配置的总超时，补抓有独立的 30 秒窗口；客户端断开会取消在途工作。
 
-错误统一为 `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`：400 输入错误、401 `invalid_api_key`、402 额度不足、404 无可用正文或直连目标不可用、408 读取请求体超时、413 请求体过大、429 限流（带 `Retry-After`）、504 下游超时、500 凭据/配置/未知失败/输出超限。目标站点的 401/403 属于 Fetch 不可用；云 provider 的 401/403 返回 500。
+错误统一为 `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`：400 输入错误、401 `invalid_api_key`、402 额度不足、404 无可用正文或直连目标不可用、504 下游超时、500 凭据/配置/未知失败。429 只在**上游 provider 限流**时出现，网关自身不再因并发生成 429；请求体也不再触发 413/408。目标站点的 401/403 属于 Fetch 不可用；云 provider 的 401/403 返回 500。
 
 网关不写回 provider 顺序，也不修改配置：服务运行期间使用启动时加载的配置快照。部署方式、Docker Compose 模板、secret 挂载、诊断、升级与回滚见 [deploy/README.md](deploy/README.md)；架构决策见 [docs/adr/0019-deepseek-tool-gateway.md](docs/adr/0019-deepseek-tool-gateway.md)。
 

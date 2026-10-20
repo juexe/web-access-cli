@@ -40,11 +40,12 @@ import {
 /**
  * Minimum gateway key length. Deployments should still generate a 32-byte random
  * value (64 hex characters); this floor only rejects obviously weak keys.
+ *
+ * The gateway deliberately imposes no local admission or body limits: it is a
+ * private single-user deployment, so concurrency, body size and body read time
+ * are bounded only by the upstream providers and the process itself.
  */
 export const GATEWAY_MIN_API_KEY_LENGTH = 12;
-export const GATEWAY_MAX_BODY_BYTES = 64 * 1024;
-export const GATEWAY_BODY_TIMEOUT_MS = 10_000;
-export const GATEWAY_MAX_IN_FLIGHT = 4;
 
 export interface GatewayLogEvent {
 	method: string;
@@ -62,9 +63,6 @@ export interface GatewayServerOptions {
 	/** Test-only overrides for the backfill/size limits and clock. */
 	limits?: Partial<GatewayLimits>;
 	now?: () => number;
-	/** Test-only override of the inbound body limit and read timeout. */
-	maxBodyBytes?: number;
-	bodyTimeoutMs?: number;
 	/** Test-only override of the in-memory request record retention. */
 	recordLimit?: number;
 	/** Structured logger; never receives request bodies or credentials. */
@@ -213,39 +211,19 @@ const routeNotFound = (): GatewayHttpError =>
 		message: "接口不存在。",
 	});
 
-const requestTooLarge = (): GatewayHttpError =>
-	new GatewayHttpError({
-		status: 413,
-		type: "invalid_request_error",
-		code: "request_too_large",
-		message: "请求体超过网关大小限制。",
-	});
-
-const requestTimeout = (): GatewayHttpError =>
-	new GatewayHttpError({
-		status: 408,
-		type: "timeout_error",
-		code: "request_timeout",
-		message: "读取请求体超时。",
-	});
-
-class BodyTooLarge extends Error {}
-class BodyReadTimeout extends Error {}
 class BodyAborted extends Error {}
 
-function readJsonObject(
-	request: IncomingMessage,
-	maxBytes: number,
-	timeoutMs: number,
-): Promise<unknown> {
+/**
+ * Read the JSON object request body. There is intentionally no byte cap and no
+ * read deadline: the body is bounded only by the client and by process memory.
+ */
+function readJsonObject(request: IncomingMessage): Promise<unknown> {
 	return new Promise((resolve, reject) => {
 		const chunks: Buffer[] = [];
-		let size = 0;
 		let settled = false;
 		const finish = (error?: unknown, value?: unknown) => {
 			if (settled) return;
 			settled = true;
-			clearTimeout(timer);
 			request.off("data", onData);
 			request.off("end", onEnd);
 			request.off("error", onError);
@@ -254,11 +232,6 @@ function readJsonObject(
 			else resolve(value);
 		};
 		const onData = (chunk: Buffer) => {
-			size += chunk.byteLength;
-			if (size > maxBytes) {
-				finish(new BodyTooLarge());
-				return;
-			}
 			chunks.push(chunk);
 		};
 		const onEnd = () => {
@@ -282,10 +255,6 @@ function readJsonObject(
 		};
 		const onError = () => finish(new BodyAborted());
 		const onAborted = () => finish(new BodyAborted());
-		const timer = setTimeout(
-			() => finish(new BodyReadTimeout()),
-			Math.max(1, timeoutMs),
-		);
 		request.on("data", onData);
 		request.on("end", onEnd);
 		request.on("error", onError);
@@ -338,13 +307,10 @@ export function createGatewayServer(
 	});
 	const expected = digest(options.apiKey);
 	const records = createGatewayRecordStore(options.recordLimit);
-	const maxBodyBytes = options.maxBodyBytes ?? GATEWAY_MAX_BODY_BYTES;
-	const bodyTimeoutMs = options.bodyTimeoutMs ?? GATEWAY_BODY_TIMEOUT_MS;
 	const log =
 		options.log ??
 		((event: GatewayLogEvent) =>
 			process.stderr.write(`${JSON.stringify(event)}\n`));
-	let inFlight = 0;
 	let shuttingDown = false;
 	const active = new Set<ServerResponse>();
 
@@ -399,64 +365,43 @@ export function createGatewayServer(
 				throw invalidRequest("Content-Type 必须是 application/json。");
 			if (request.headers["content-encoding"] !== undefined)
 				throw invalidRequest("不支持压缩请求体。");
-			if (inFlight >= GATEWAY_MAX_IN_FLIGHT)
-				throw new GatewayHttpError({
-					status: 429,
-					type: "rate_limit_error",
-					code: "rate_limit_exceeded",
-					message: "网关并发已满，请稍后重试。",
-					retryAfterSeconds: 1,
-				});
-			inFlight += 1;
-			try {
-				const raw = await readJsonObject(request, maxBodyBytes, bodyTimeoutMs);
-				const parsed =
-					route === "search"
-						? parseGatewaySearchRequest(raw)
-						: parseGatewayFetchRequest(raw);
-				if (route === "search") {
-					const search = parsed as GatewaySearchRequest;
-					summary.query = search.query;
-					summary.count = search.count;
-					summary.needContent = search.need_content ?? false;
-				} else {
-					summary.url = (parsed as GatewayFetchRequest).url;
-				}
-				const observer = {
-					onSuccess: (info: { provider: string }) => {
-						summary.provider = info.provider;
-					},
-				};
-				const body: unknown =
-					route === "search"
-						? await service.search(
-								parsed as never,
-								clientAbort.signal,
-								observer,
-							)
-						: await service.fetch(
-								parsed as never,
-								clientAbort.signal,
-								observer,
-							);
-				if (clientAbort.signal.aborted || response.writableEnded) {
-					clientAborted = true;
-					return;
-				}
-				if (route === "search") {
-					const searchBody = body as GatewaySearchResponse;
-					summary.resultCount = searchBody.results.length;
-					summary.results = searchBody.results
-						.slice(0, GATEWAY_RECORD_MAX_RESULTS)
-						.map((result) => ({ title: result.title, url: result.url }));
-				} else {
-					summary.title = (body as GatewayFetchResponse).title;
-				}
-				status = 200;
-				sendJson(response, 200, body);
-			} finally {
-				inFlight -= 1;
+			const raw = await readJsonObject(request);
+			const parsed =
+				route === "search"
+					? parseGatewaySearchRequest(raw)
+					: parseGatewayFetchRequest(raw);
+			if (route === "search") {
+				const search = parsed as GatewaySearchRequest;
+				summary.query = search.query;
+				summary.count = search.count;
+				summary.needContent = search.need_content ?? false;
+			} else {
+				summary.url = (parsed as GatewayFetchRequest).url;
 			}
+			const observer = {
+				onSuccess: (info: { provider: string }) => {
+					summary.provider = info.provider;
+				},
+			};
+			const body: unknown =
+				route === "search"
+					? await service.search(parsed as never, clientAbort.signal, observer)
+					: await service.fetch(parsed as never, clientAbort.signal, observer);
+			if (clientAbort.signal.aborted || response.writableEnded) {
+				clientAborted = true;
+				return;
+			}
+			if (route === "search") {
+				const searchBody = body as GatewaySearchResponse;
+				summary.resultCount = searchBody.results.length;
+				summary.results = searchBody.results
+					.slice(0, GATEWAY_RECORD_MAX_RESULTS)
+					.map((result) => ({ title: result.title, url: result.url }));
+			} else {
+				summary.title = (body as GatewayFetchResponse).title;
+			}
+			status = 200;
+			sendJson(response, 200, body);
 		} catch (error) {
 			if (error instanceof GatewayClientAbort || clientAbort.signal.aborted) {
 				clientAborted = true;
@@ -465,28 +410,21 @@ export function createGatewayServer(
 			const mapped: GatewayHttpError =
 				error instanceof GatewayValidationError
 					? invalidRequest(error.message)
-					: error instanceof BodyTooLarge
-						? requestTooLarge()
-						: error instanceof BodyReadTimeout
-							? requestTimeout()
-							: error instanceof BodyAborted
-								? invalidRequest("请求读取中断。")
-								: error instanceof GatewayHttpError
-									? error
-									: new GatewayHttpError({
-											status: 500,
-											type: "server_error",
-											code: "internal_error",
-											message: "网关内部错误。",
-										});
+					: error instanceof BodyAborted
+						? invalidRequest("请求读取中断。")
+						: error instanceof GatewayHttpError
+							? error
+							: new GatewayHttpError({
+									status: 500,
+									type: "server_error",
+									code: "internal_error",
+									message: "网关内部错误。",
+								});
 			status = mapped.status;
 			code = mapped.code;
 			summary.provider = summary.provider ?? mapped.provider;
-			// Body limits and timeouts close the connection after the error envelope.
-			const closeConnection =
-				error instanceof BodyTooLarge ||
-				error instanceof BodyReadTimeout ||
-				error instanceof BodyAborted;
+			// A body read failure leaves the socket unusable for a follow-up request.
+			const closeConnection = error instanceof BodyAborted;
 			sendError(
 				response,
 				mapped,
@@ -619,7 +557,7 @@ export function createGatewayServer(
 			shuttingDown = true;
 			const drained = new Promise<void>((resolveDrained) => {
 				const poll = () => {
-					if (inFlight === 0) resolveDrained();
+					if (active.size === 0) resolveDrained();
 					else setTimeout(poll, 20).unref();
 				};
 				poll();
