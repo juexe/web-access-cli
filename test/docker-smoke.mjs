@@ -24,7 +24,15 @@ const gatewayKey = randomBytes(32).toString("hex");
 const BIND_PORT = 18_180 + (process.pid % 500);
 const baseUrl = `http://127.0.0.1:${BIND_PORT}`;
 
-writeFileSync(gatewayKeyFile, `${gatewayKey}\n`, { mode: 0o600 });
+// The gateway image runs as uid 1000, and a bind mount keeps the host file's
+// owner and mode. A 0600 file created by a different host user is therefore
+// unreadable inside the container, which reproduced as an immediate
+// `EACCES ... /run/secrets/gateway-api-key` startup failure on Linux CI. Use a
+// world-readable mode here: this fixture is a throwaway key, and the check below
+// still proves the image itself carries no credential.
+const secretMode = 0o644;
+
+writeFileSync(gatewayKeyFile, `${gatewayKey}\n`, { mode: secretMode });
 writeFileSync(
 	providerConfig,
 	JSON.stringify(
@@ -43,7 +51,7 @@ writeFileSync(
 		null,
 		2,
 	),
-	{ mode: 0o600 },
+	{ mode: secretMode },
 );
 writeFileSync(
 	envFile,
