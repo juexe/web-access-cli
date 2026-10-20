@@ -162,6 +162,7 @@ test("默认配置缺失时创建完整配置并写入内部顺序", async (t) =
 		"searxng",
 		"anysearch",
 		"xcrawl",
+		"deepseek",
 		"tavily",
 	]);
 	assert.equal(Array.isArray(parsed.providers), true);

@@ -1,6 +1,6 @@
 # ADR 0009：DeepSeek Search Provider 协议映射
 
-- 状态：已接受
+- 状态：已被 ADR 0021 取代
 - 日期：2026-08-19
 
 ## 背景

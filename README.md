@@ -14,7 +14,7 @@ The CLI is the primary product interface. It is not tied to Pi, Claude Code, Cod
 | Capability | Provider types | Normalized output |
 | --- | --- | --- |
 | `search` | Tavily, Exa, Bocha, Yuanbao Search, Brave, SearXNG, AnySearch, XCrawl, DeepSeek, xAI x_search, xAI web_search | `rank`, `title`, `url`, `snippet` |
-| `extract` | Firecrawl v2, Jina Reader, Exa Contents, AnySearch, XCrawl, HTTP | Markdown `Document` |
+| `extract` | Firecrawl v2, Jina Reader, Exa Contents, AnySearch, XCrawl, DeepSeek Fetch, HTTP | Markdown `Document` |
 
 A provider type describes an implementation, while a provider instance is a configurable instance of that type. One type can have multiple instances, such as `exa_team` and `exa_personal`. Each capability has a primary `providers` route and a `providers_fallback` route. Both arrays determine enabled instances and their current `auto` order; the CLI only reorders members within their existing group.
 
@@ -121,7 +121,7 @@ The complete JSON Schema is available at [schemas/config.schema.json](schemas/co
 
 ```json
 {
-  "$schema": "https://unpkg.com/web-access-cli@0.5.0/schemas/config.schema.json",
+  "$schema": "https://unpkg.com/web-access-cli@0.6.0/schemas/config.schema.json",
   "providers": [
     {
       "id": "exa_team",
@@ -161,20 +161,20 @@ The complete JSON Schema is available at [schemas/config.schema.json](schemas/co
 }
 ```
 
-The built-in instances are `tavily`, `exa`, `bocha`, `yuanbao`, `brave`, `searxng`, `firecrawl`, `jina`, `http`, `anysearch`, `xcrawl`, `deepseek`, `xai_x_search`, and `xai_web_search`. A configuration entry with the same ID overrides fields on the built-in instance. A custom ID creates another instance of the selected type. An instance is enabled when it appears in either corresponding route. Bocha defaults to `https://api.bocha.cn` and requires an API key; Yuanbao Search defaults to `https://api.wsa.cloud.tencent.com` and requires a service API key; AnySearch defaults to `https://api.anysearch.com` and supports anonymous calls; XCrawl defaults to `https://run.xcrawl.com` and requires an API key; DeepSeek defaults to `https://api.deepseek.com/anthropic/v1` and requires an API key.
+The built-in instances are `tavily`, `exa`, `bocha`, `yuanbao`, `brave`, `searxng`, `firecrawl`, `jina`, `http`, `anysearch`, `xcrawl`, `deepseek`, `xai_x_search`, and `xai_web_search`. A configuration entry with the same ID overrides fields on the built-in instance. A custom ID creates another instance of the selected type. An instance is enabled when it appears in either corresponding route. Bocha defaults to `https://api.bocha.cn` and requires an API key; Yuanbao Search defaults to `https://api.wsa.cloud.tencent.com` and requires a service API key; AnySearch defaults to `https://api.anysearch.com` and supports anonymous calls; XCrawl defaults to `https://run.xcrawl.com` and requires an API key; DeepSeek defaults to `https://api.deepseek.com` and requires an API key.
 
 Default routes:
 
-- Search primary: `tavily -> exa -> bocha -> yuanbao -> brave -> searxng -> anysearch -> xcrawl`
-- Search fallback: `deepseek -> xai_x_search -> xai_web_search`
-- Extract primary: `firecrawl -> jina -> exa -> anysearch -> xcrawl`
+- Search primary: `tavily -> exa -> bocha -> yuanbao -> brave -> searxng -> anysearch -> xcrawl -> deepseek`
+- Search fallback: `xai_x_search -> xai_web_search`
+- Extract primary: `firecrawl -> jina -> exa -> anysearch -> xcrawl -> deepseek`
 - Extract fallback: `http`
 
 The default routes split built-in providers into a primary group and a fallback group. Custom instance IDs are merged into the instance list but must still be added to a route explicitly. An omitted capability route uses the defaults above; an explicit Search primary empty array is invalid, while Extract may be explicitly disabled with an empty primary route. In `auto` mode, incompletely configured instances are skipped. AnySearch and XCrawl accept `searchFilterMode`: `strict` (default; freshness skips the provider) or `best_effort` (rewrites freshness into a query fragment). Domain constraints are rewritten into the query and strictly re-applied locally. XCrawl Extract always uses synchronous Scrape with Markdown output; Map, Crawl, and asynchronous jobs are outside the current CLI capabilities.
 
 Yuanbao Search calls Tencent Cloud `POST /SearchPro` with a bearer service API key and a lower-case request body (`Query`, plus optional `Site` and `Freshness`). One `site:` include becomes `Site=<domain>`; up to five excludes become `Site=exclude:<domain>|<domain>`; other combinations are filtered locally only. Each entry of `Pages` is a JSON string and is mapped to `title`/`url`/`snippet`, preferring the standard `passage` summary over the dynamic `content`. Errors returned inside a successful HTTP response, such as `UnauthorizedOperation` or `ResourceNotFound`, stay fallback-eligible so `auto` can continue to the next provider. Only Search is supported; `Cnt` is omitted while `--limit` stays at or below 10 so the lite edition keeps working, and is rounded up to the next multiple of 10 (maximum 50) above that.
 
-DeepSeek Search performs a full Anthropic-compatible Messages model turn with the native `web_search_20250305` server tool, so it can have higher latency and cost than a dedicated search endpoint. It is in the default Search fallback group and is reached only after every primary provider is unavailable, returns a final non-2xx HTTP response, or otherwise fails recoverably. The adapter accepts URLs only from structured `web_search_tool_result` blocks, joins citation excerpts by URL, and never extracts URLs from model prose. Domain constraints are rewritten into the query and strictly re-applied locally; `freshness` is unsupported and skips DeepSeek with a recoverable error. Redirects are rejected without contacting the `Location` target. Provider-private `encrypted_content` payloads are omitted from `raw` because they are opaque, cannot be displayed or decoded by the CLI, and add no diagnostic value.
+DeepSeek uses the official tool API: Search posts to `{baseUrl}/v1/tools/search` and Fetch posts to `{baseUrl}/v1/tools/fetch`, both with a Bearer `DEEPSEEK_API_KEY`. Search sends `count` and `need_content: false` and maps `title`/`url`/`snippet` from `results`, falling back to the longer `summary` only when `snippet` is empty; the remaining fields stay in `raw`. `freshness` has no request field, so it is rewritten into the documented `after:` search syntax, and domain constraints use `site:`/`-site:`. Both are hints only and are strictly re-applied locally; if the combined query would exceed the 128-character limit, the remote hints are dropped and the original query kept. Fetch returns `content` as the Markdown body and `title` as the title; HTTP 404 or an empty body becomes fallback-eligible `no_usable_content`. 401 is `auth_error`, 402 is `quota_exceeded`, 429 is `rate_limited`, and other statuses are `provider_error`; 400/401/402/403 are not retryable against the same provider.
 
 XAI hosted Search reads an external OAuth JSON file from `XAI_AUTH_JSON` on every call and uses only its `access_token`; an external CLIProxyAPI process owns refresh and write-back. Instance fields `authJson`/`authJsonEnv` and `model`/`modelEnv` override the path and model. `xai_web_search` accepts at most five allow or exclude domains (mutually exclusive); `xai_x_search` rejects `freshness`. Model-backed search can take longer than ordinary API searches; Search defaults allow up to 60 seconds per attempt and 120 seconds total.
 
@@ -194,7 +194,7 @@ Environment variables take precedence over plaintext keys in JSON. Built-in inst
 | HTTP | None | None |
 | AnySearch | `ANYSEARCH_API_KEY`, optional | `ANYSEARCH_BASE_URL`, default `https://api.anysearch.com` |
 | XCrawl | `XCRAWL_API_KEY` | `XCRAWL_BASE_URL`, default `https://run.xcrawl.com` |
-| DeepSeek | `DEEPSEEK_API_KEY` | No standard environment variable; default `https://api.deepseek.com/anthropic/v1` |
+| DeepSeek | `DEEPSEEK_API_KEY` | No standard environment variable; default `https://api.deepseek.com` |
 | xAI Search | `XAI_AUTH_JSON` | No standard API-key variable; default `https://cli-chat-proxy.grok.com/v1`, model `grok-4.6` |
 
 Custom instances use `apiKeyEnv` and `baseUrlEnv` to name their environment variables. Every remote provider can define a `baseUrl` and additional `headers`. The public `api.firecrawl.dev` service requires a key; a self-hosted Firecrawl v2 instance can run without one.

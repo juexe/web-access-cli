@@ -436,96 +436,97 @@ test("元宝搜索边界：排除域名、无过滤、空结果与业务错误",
 	});
 });
 
-test("DeepSeek 使用固定 Messages 协议并只映射结构化搜索结果", async () => {
+test("DeepSeek 使用官方 Search 协议并只映射结构化结果", async () => {
 	const transport = new MockTransport((url, options) => {
-		assert.equal(url, "https://deepseek.test/messages");
+		assert.equal(url, "https://deepseek.test/v1/tools/search");
 		assert.equal(options.method, "POST");
 		assert.equal(options.signal, signal);
 		assert.equal(options.maxResponseBytes, 1024 * 1024);
-		assert.equal(options.maxRedirects, 0);
-		assert.equal(options.headers?.["x-api-key"], "test-key");
 		assert.equal(options.headers?.Authorization, "Bearer test-key");
-		assert.equal(options.headers?.["anthropic-version"], "2023-06-01");
 		assert.equal(options.headers?.["Content-Type"], "application/json");
 		assert.equal(options.headers?.Accept, "application/json");
-		assert.match(options.headers?.["User-Agent"] ?? "", /^web-access-cli\//);
 		assert.equal(options.headers?.["X-Team"], "search");
 		assert.equal(options.headers?.authorization, undefined);
-		assert.deepEqual(JSON.parse(options.body ?? ""), {
-			model: "deepseek-v4-flash",
-			max_tokens: 4096,
-			messages: [
-				{
-					role: "user",
-					content: [
-						{
-							type: "text",
-							text: "Perform a web search for the query: agent neutral web cli site:example.com -site:blocked.example.com",
-						},
-					],
-				},
-			],
-			tools: [
-				{
-					type: "web_search_20250305",
-					name: "web_search",
-					max_uses: 5,
-				},
-			],
-		});
+		const body = JSON.parse(options.body ?? "") as Record<string, unknown>;
+		assert.equal(body.count, 2);
+		assert.equal(body.need_content, false);
+		assert.match(
+			String(body.query),
+			/^agent neutral web cli site:example\.com -site:blocked\.example\.com after:\d{4}-\d{2}-\d{2}$/,
+		);
 		return response({
-			content: [
-				{ type: "thinking", thinking: "ignore" },
-				{ type: "server_tool_use", name: "web_search" },
+			results: [
 				{
-					type: "text",
-					text: "Prose URL https://prose.example.com must be ignored",
-					citations: [
-						{
-							url: "https://example.com/a#fragment",
-							cited_text: "first citation",
-						},
-						{
-							url: "https://example.com/a#fragment",
-							cited_text: "later citation",
-						},
-					],
+					rerank_score: 2.4,
+					title: "A",
+					url: "https://example.com/a#fragment",
+					snippet: "short",
+					summary: "long",
+					content: "",
+					site_name: "Example",
+					site_icon: null,
+					date: null,
+					authority: 3,
 				},
 				{
-					type: "web_search_tool_result",
-					content: [
-						{
-							type: "web_search_result",
-							title: "A",
-							url: "https://example.com/a#fragment",
-							page_age: "2026-08-01",
-							encrypted_content: "opaque-provider-payload",
-						},
-						{
-							type: "web_search_result",
-							title: "duplicate",
-							url: "https://example.com/a",
-						},
-						{
-							type: "web_search_result_error",
-							url: "https://example.com/error",
-						},
-						{
-							type: "web_search_result",
-							title: "blocked",
-							url: "https://blocked.example.com/b",
-						},
-						{
-							type: "web_search_result",
-							title: "invalid",
-							url: "ftp://example.com/file",
-						},
-						{
-							type: "web_search_result",
-							title: "B",
-							url: "https://example.com/b",
-						},
-					],
+					rerank_score: 1.1,
+					title: "summary fallback",
+					url: "https://example.com/c",
+					snippet: "",
+					summary: "longer summary",
+					content: "",
+					site_name: null,
+					site_icon: null,
+					date: null,
+					authority: 0,
+				},
+				{
+					rerank_score: 0.5,
+					title: "duplicate",
+					url: "https://example.com/a",
+					snippet: "dup",
+					summary: "",
+					content: "",
+					site_name: null,
+					site_icon: null,
+					date: null,
+					authority: 0,
+				},
+				{
+					rerank_score: 0.9,
+					title: "blocked",
+					url: "https://blocked.example.com/b",
+					snippet: "blocked",
+					summary: "",
+					content: "",
+					site_name: null,
+					site_icon: null,
+					date: null,
+					authority: 0,
+				},
+				{
+					rerank_score: 0.8,
+					title: "invalid",
+					url: "ftp://example.com/file",
+					snippet: "ftp",
+					summary: "",
+					content: "",
+					site_name: null,
+					site_icon: null,
+					date: null,
+					authority: 0,
+				},
+				{
+					rerank_score: 0.7,
+					title: "B",
+					url: "https://example.com/b",
+					snippet: "second",
+					summary: "",
+					content: "",
+					site_name: null,
+					site_icon: null,
+					date: null,
+					authority: 1,
 				},
 			],
 		});
@@ -533,75 +534,170 @@ test("DeepSeek 使用固定 Messages 协议并只映射结构化搜索结果", a
 	const adapter = getAdapter("deepseek", "search");
 	assert.ok(adapter?.search);
 	const request = searchRequest("deepseek", transport);
-	request.freshness = undefined;
 	request.instance.headers = {
 		"X-Team": "search",
 		authorization: "Bearer untrusted",
-		"X-API-Key": "untrusted",
-		"user-agent": "untrusted",
 	};
 	const result = await adapter.search(request);
 	assert.deepEqual(result.data.results, [
-		{
-			rank: 1,
-			title: "A",
-			url: "https://example.com/a",
-			snippet: "first citation",
-		},
+		{ rank: 1, title: "A", url: "https://example.com/a", snippet: "short" },
 		{
 			rank: 2,
-			title: "B",
-			url: "https://example.com/b",
-			snippet: "",
+			title: "summary fallback",
+			url: "https://example.com/c",
+			snippet: "longer summary",
 		},
 	]);
-	assert.doesNotMatch(
-		JSON.stringify(result.raw),
-		/encrypted_content|opaque-provider-payload/,
-	);
-	assert.match(JSON.stringify(result.raw), /web_search_tool_result/);
+	assert.match(JSON.stringify(result.raw), /rerank_score/);
 });
 
-test("DeepSeek 区分空结果块与缺少结果块", async () => {
+test("DeepSeek 区分空结果与无效 results", async () => {
 	const adapter = getAdapter("deepseek", "search");
 	assert.ok(adapter?.search);
-	const emptyTransport = new MockTransport(() =>
-		response({ content: [{ type: "web_search_tool_result", content: [] }] }),
+	const emptyTransport = new MockTransport(() => response({ results: [] }));
+	assert.deepEqual(
+		(await adapter.search(searchRequest("deepseek", emptyTransport))).data
+			.results,
+		[],
 	);
-	const emptyRequest = searchRequest("deepseek", emptyTransport);
-	emptyRequest.freshness = undefined;
-	assert.deepEqual((await adapter.search(emptyRequest)).data.results, []);
 
-	const missingTransport = new MockTransport(() =>
-		response({ content: [{ type: "text", text: "only prose" }] }),
+	const missingTransport = new MockTransport(() => response({}));
+	assert.deepEqual(
+		(await adapter.search(searchRequest("deepseek", missingTransport))).data
+			.results,
+		[],
 	);
-	const missingRequest = searchRequest("deepseek", missingTransport);
-	missingRequest.freshness = undefined;
+
+	const invalidTransport = new MockTransport(() =>
+		response({ results: "not-an-array" }),
+	);
 	await assert.rejects(
-		adapter.search(missingRequest),
+		adapter.search(searchRequest("deepseek", invalidTransport)),
 		(error: unknown) =>
-			error instanceof Error &&
-			"code" in error &&
-			error.code === "provider_error" &&
-			"retryable" in error &&
-			error.retryable === true,
+			error instanceof WebAccessError && error.code === "invalid_response",
 	);
 });
 
-test("DeepSeek freshness 预检查不发请求", async () => {
-	const transport = new MockTransport(() => response({ content: [] }));
+test("DeepSeek 商业与协议错误映射为稳定错误且不泄漏 key", async (t) => {
+	const cases = [
+		{ status: 400, code: "provider_error", retryable: false },
+		{ status: 401, code: "auth_error", retryable: false },
+		{ status: 402, code: "quota_exceeded", retryable: false },
+		{ status: 403, code: "provider_error", retryable: false },
+		{ status: 408, code: "provider_error", retryable: true },
+		{ status: 429, code: "rate_limited", retryable: true },
+		{ status: 504, code: "provider_error", retryable: true },
+	] as const;
+	for (const item of cases) {
+		await t.test(`HTTP ${item.status}`, async () => {
+			const transport = new MockTransport(() =>
+				response(
+					{
+						error: {
+							message: "rejected test-key",
+							type: "invalid_request_error",
+							param: null,
+							code: "invalid_request_error",
+						},
+					},
+					{ status: item.status },
+				),
+			);
+			const adapter = getAdapter("deepseek", "search");
+			assert.ok(adapter?.search);
+			await assert.rejects(
+				adapter.search(searchRequest("deepseek", transport)),
+				(error: unknown) => {
+					assert.ok(error instanceof WebAccessError);
+					assert.equal(error.code, item.code);
+					assert.equal(error.httpStatus, item.status);
+					assert.equal(error.retryable, item.retryable);
+					assert.doesNotMatch(error.message, /test-key/);
+					assert.doesNotMatch(JSON.stringify(error.raw), /test-key/);
+					return true;
+				},
+			);
+		});
+	}
+});
+
+test("DeepSeek 把 freshness 改写为 after 搜索语法", async () => {
+	const transport = new MockTransport(() => response({ results: [] }));
 	const adapter = getAdapter("deepseek", "search");
 	assert.ok(adapter?.search);
-	await assert.rejects(
-		adapter.search(searchRequest("deepseek", transport)),
-		(error: unknown) =>
-			error instanceof Error &&
-			"code" in error &&
-			error.code === "provider_unavailable" &&
-			"retryable" in error &&
-			error.retryable === true,
-	);
-	assert.equal(transport.calls.length, 0);
+	const request = searchRequest("deepseek", transport);
+	request.freshness = "day";
+	await adapter.search(request);
+	const body = JSON.parse(transport.calls[0]?.options.body ?? "") as {
+		query: string;
+	};
+	assert.match(body.query, / after:\d{4}-\d{2}-\d{2}$/);
+});
+
+test("DeepSeek Fetch 映射 Markdown 正文与标题", async () => {
+	const transport = new MockTransport((url, options) => {
+		assert.equal(url, "https://deepseek.test/v1/tools/fetch");
+		assert.equal(options.method, "POST");
+		assert.equal(options.headers?.Authorization, "Bearer test-key");
+		assert.deepEqual(JSON.parse(options.body ?? ""), {
+			url: "https://example.com/article",
+		});
+		return response({
+			title: "Example article",
+			content: "# Example article\n\nArticle content.",
+		});
+	});
+	const adapter = getAdapter("deepseek", "extract");
+	assert.ok(adapter?.extract);
+	const result = await adapter.extract(extractRequest("deepseek", transport));
+	assert.deepEqual(result.data.document, {
+		sourceUrl: "https://example.com/article",
+		title: "Example article",
+		content: "# Example article\n\nArticle content.",
+		contentType: "text/markdown",
+	});
+	assert.doesNotMatch(JSON.stringify(result.raw), /test-key/);
+});
+
+test("DeepSeek Fetch 空正文与 404 都按可回退内容错误处理", async (t) => {
+	await t.test("empty content", async () => {
+		const transport = new MockTransport(() =>
+			response({ title: "", content: "" }),
+		);
+		const adapter = getAdapter("deepseek", "extract");
+		assert.ok(adapter?.extract);
+		await assert.rejects(
+			adapter.extract(extractRequest("deepseek", transport)),
+			(error: unknown) =>
+				error instanceof WebAccessError &&
+				error.code === "no_usable_content" &&
+				error.retryable === true,
+		);
+	});
+	await t.test("HTTP 404", async () => {
+		const transport = new MockTransport(() =>
+			response(
+				{
+					error: {
+						message: "could not fetch",
+						type: "invalid_request_error",
+						param: null,
+						code: "not_found",
+					},
+				},
+				{ status: 404 },
+			),
+		);
+		const adapter = getAdapter("deepseek", "extract");
+		assert.ok(adapter?.extract);
+		await assert.rejects(
+			adapter.extract(extractRequest("deepseek", transport)),
+			(error: unknown) =>
+				error instanceof WebAccessError &&
+				error.code === "no_usable_content" &&
+				error.httpStatus === 404,
+		);
+	});
 });
 
 test("xAI hosted search 映射引用、域名过滤并脱敏 OAuth token", async () => {

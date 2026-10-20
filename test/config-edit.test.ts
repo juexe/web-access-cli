@@ -78,15 +78,16 @@ test("config edit 创建完整默认配置后再调用编辑器", async (t) => {
 			"searxng",
 			"anysearch",
 			"xcrawl",
+			"deepseek",
 		],
-		providers_fallback: ["deepseek", "xai_x_search", "xai_web_search"],
+		providers_fallback: ["xai_x_search", "xai_web_search"],
 		limit: 5,
 		timeoutMs: 120_000,
 		attemptTimeoutMs: 60_000,
 		maxResponseBytes: 5 * 1024 * 1024,
 	});
 	assert.deepEqual(parsed.extract, {
-		providers: ["firecrawl", "jina", "exa", "anysearch", "xcrawl"],
+		providers: ["firecrawl", "jina", "exa", "anysearch", "xcrawl", "deepseek"],
 		providers_fallback: ["http"],
 		timeoutMs: 120_000,
 		attemptTimeoutMs: 45_000,

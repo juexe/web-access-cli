@@ -720,7 +720,7 @@ test("auto 不扩大 HTTP 2xx 内嵌业务错误的回退范围", async () => {
 	}
 });
 
-test("auto 在前序成功时不调用 DeepSeek", async () => {
+test("auto 在前序成功时不调用 fallback 中的 DeepSeek", async () => {
 	const fixture = loadedConfig({
 		providers: [
 			{ id: "brave", type: "brave", apiKey: "brave-key" },
@@ -1210,6 +1210,103 @@ test("extractPreflight 探针超时受覆盖值限制并继续原 route", async 
 		assert.equal(envelope.ok, true);
 		assert.ok(elapsedMs < 5000);
 		if (hasProvider(envelope)) assert.equal(envelope.provider, "http");
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("DeepSeek 作为主轮 Search provider 参与 auto 并成功后置顶", async () => {
+	const fixture = loadedConfig({
+		providers: [
+			{ id: "brave", type: "brave", apiKey: "brave-key" },
+			{ id: "deepseek", type: "deepseek", apiKey: "deepseek-key" },
+		],
+		search: { providers: ["brave", "deepseek"] },
+		extract: { providers: [] },
+	});
+	const updates: ProviderOrderUpdate[] = [];
+	try {
+		const transport = new MockTransport((url) => {
+			if (url.includes("api.search.brave.com"))
+				return response({ error: "temporary" }, { status: 500 });
+			return response({
+				results: [
+					{
+						title: "DeepSeek result",
+						url: "https://example.com/deepseek",
+						snippet: "native search",
+					},
+				],
+			});
+		});
+		const envelope = await executeSearch(searchRequest, {
+			loaded: fixture.loaded,
+			transport,
+			debug: true,
+			persistProviderOrder: async (value) => {
+				updates.push(...value);
+			},
+		});
+		assert.equal(envelope.ok, true);
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "deepseek");
+		assert.deepEqual(envelope.data, {
+			results: [
+				{
+					rank: 1,
+					title: "DeepSeek result",
+					url: "https://example.com/deepseek",
+					snippet: "native search",
+				},
+			],
+		});
+		assert.deepEqual(updates, [
+			{
+				capability: "search",
+				route: "providers",
+				configuredProviders: ["brave", "deepseek"],
+				winner: "deepseek",
+				failed: ["brave"],
+			},
+		]);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("DeepSeek Fetch 可作为 Extract provider 并保持 fallback 语义", async () => {
+	const fixture = loadedConfig({
+		providers: [{ id: "deepseek", type: "deepseek", apiKey: "deepseek-key" }],
+		search: { providers: ["tavily"] },
+		extract: {
+			providers: ["deepseek"],
+			providers_fallback: ["http"],
+			minContentCharacters: 20,
+		},
+	});
+	try {
+		const transport = new MockTransport((url) => {
+			if (url.endsWith("/v1/tools/fetch"))
+				return response({
+					title: "DeepSeek 页面",
+					content: "# 正文\n\n这是一段足够长的正文内容，用于验证统一文档输出。",
+				});
+			return response("not found", { status: 404 });
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{ loaded: fixture.loaded, transport },
+		);
+		assert.equal(envelope.ok, true);
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "deepseek");
+		if (!("document" in envelope.data)) return;
+		assert.deepEqual(envelope.data.document, {
+			sourceUrl: "https://example.com/article",
+			title: "DeepSeek 页面",
+			content: "# 正文\n\n这是一段足够长的正文内容，用于验证统一文档输出。",
+			contentType: "text/markdown",
+		});
 	} finally {
 		fixture.cleanup();
 	}

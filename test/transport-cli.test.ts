@@ -201,16 +201,12 @@ test("HTTP transport 跟随重定向并执行响应大小硬上限", async (t) =
 	}
 });
 
-test("DeepSeek adapter 严格拒绝重定向且不接触 Location 目标", async (t) => {
+test("DeepSeek adapter 跟随统一 transport 的重定向策略", async (t) => {
 	let targetRequests = 0;
 	const target = createServer((_request, response) => {
 		targetRequests++;
 		response.writeHead(200, { "Content-Type": "application/json" });
-		response.end(
-			JSON.stringify({
-				content: [{ type: "web_search_tool_result", content: [] }],
-			}),
-		);
+		response.end(JSON.stringify({ results: [] }));
 	});
 	await new Promise<void>((resolveListen) =>
 		target.listen(0, "127.0.0.1", resolveListen),
@@ -245,26 +241,21 @@ test("DeepSeek adapter 严格拒绝重定向且不接触 Location 目标", async
 	try {
 		const adapter = getAdapter("deepseek", "search");
 		assert.ok(adapter?.search);
-		await assert.rejects(
-			adapter.search({
-				query: "redirect policy",
-				limit: 5,
-				includeDomains: [],
-				excludeDomains: [],
-				signal: new AbortController().signal,
-				maxResponseBytes: 1024,
-				instance: instance("deepseek", {
-					baseUrl: `http://127.0.0.1:${redirectAddress.port}`,
-				}),
-				transport: new DefaultHttpTransport(),
+		// 同 origin 的 302 由 transport 按默认上限跟随，最终拿到空结果。
+		const result = await adapter.search({
+			query: "redirect policy",
+			limit: 5,
+			includeDomains: [],
+			excludeDomains: [],
+			signal: new AbortController().signal,
+			maxResponseBytes: 1024,
+			instance: instance("deepseek", {
+				baseUrl: `http://127.0.0.1:${redirectAddress.port}`,
 			}),
-			(error: unknown) =>
-				typeof error === "object" &&
-				error !== null &&
-				"code" in error &&
-				error.code === "provider_error",
-		);
-		assert.equal(targetRequests, 0);
+			transport: new DefaultHttpTransport(),
+		});
+		assert.deepEqual(result.data.results, []);
+		assert.equal(targetRequests, 1);
 	} finally {
 		if (previousNoProxy === undefined) delete process.env.NO_PROXY;
 		else process.env.NO_PROXY = previousNoProxy;

@@ -25,9 +25,9 @@ export const DEFAULT_SEARCH_PROVIDERS = [
 	"searxng",
 	"anysearch",
 	"xcrawl",
+	"deepseek",
 ] as const;
 export const DEFAULT_SEARCH_FALLBACK_PROVIDERS = [
-	"deepseek",
 	"xai_x_search",
 	"xai_web_search",
 ] as const;
@@ -37,6 +37,7 @@ export const DEFAULT_EXTRACT_PROVIDERS = [
 	"exa",
 	"anysearch",
 	"xcrawl",
+	"deepseek",
 ] as const;
 export const DEFAULT_EXTRACT_FALLBACK_PROVIDERS = ["http"] as const;
 export const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
@@ -79,6 +80,7 @@ const EXTRACT_TYPES = new Set<ProviderType>([
 	"http",
 	"anysearch",
 	"xcrawl",
+	"deepseek",
 ]);
 
 const DEFAULT_INSTANCE_CONFIGS: ProviderInstanceConfig[] = [
@@ -651,7 +653,7 @@ const DEFAULT_BASE_URLS: Partial<Record<ProviderType, string>> = {
 	jina: "https://r.jina.ai",
 	anysearch: "https://api.anysearch.com",
 	xcrawl: "https://run.xcrawl.com",
-	deepseek: "https://api.deepseek.com/anthropic/v1",
+	deepseek: "https://api.deepseek.com",
 	xai_x_search: DEFAULT_BASE_URLS_XAI,
 	xai_web_search: DEFAULT_BASE_URLS_XAI,
 };

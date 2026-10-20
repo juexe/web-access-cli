@@ -23,13 +23,14 @@ test("config init 按标准凭据筛选主 Route 并写入公开 fallback", asyn
 			explicitPath: fixture.path,
 			env: {
 				TAVILY_API_KEY: "configured",
+				DEEPSEEK_API_KEY: "configured",
 				FIRECRAWL_API_KEY: "configured",
 			},
 		});
 		assert.equal(envelope.command, "config.init");
-		assert.deepEqual(envelope.data.searchProviders, ["tavily"]);
+		assert.deepEqual(envelope.data.searchProviders, ["tavily", "deepseek"]);
 		assert.deepEqual(envelope.data.searchFallbackProviders, []);
-		assert.deepEqual(envelope.data.extractProviders, ["firecrawl"]);
+		assert.deepEqual(envelope.data.extractProviders, ["firecrawl", "deepseek"]);
 		assert.deepEqual(envelope.data.extractFallbackProviders, ["http"]);
 
 		const parsed = JSON.parse(readFileSync(fixture.path, "utf8")) as {
@@ -38,9 +39,9 @@ test("config init 按标准凭据筛选主 Route 并写入公开 fallback", asyn
 			extract: { providers: string[]; providers_fallback: string[] };
 		};
 		assert.equal(parsed.providers.length, 14);
-		assert.deepEqual(parsed.search.providers, ["tavily"]);
+		assert.deepEqual(parsed.search.providers, ["tavily", "deepseek"]);
 		assert.deepEqual(parsed.search.providers_fallback, []);
-		assert.deepEqual(parsed.extract.providers, ["firecrawl"]);
+		assert.deepEqual(parsed.extract.providers, ["firecrawl", "deepseek"]);
 		assert.deepEqual(parsed.extract.providers_fallback, ["http"]);
 		assert.equal(loadConfig(fixture.path, {}).exists, true);
 	} finally {

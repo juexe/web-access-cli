@@ -14,7 +14,7 @@ CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCo
 | 能力 | Provider Type | 统一输出 |
 | --- | --- | --- |
 | `search` | Tavily、Exa、Bocha、元宝搜索、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、xAI x_search、xAI web_search | `rank`、`title`、`url`、`snippet` |
-| `extract` | Firecrawl v2、Jina Reader、Exa Contents、AnySearch、XCrawl、HTTP | Markdown `Document` |
+| `extract` | Firecrawl v2、Jina Reader、Exa Contents、AnySearch、XCrawl、DeepSeek Fetch、HTTP | Markdown `Document` |
 
 Provider Type 描述实现类型；Provider Instance 是一份可配置实例。一个 Type 可以有多个 Instance，例如 `exa_team` 和 `exa_personal`。每个能力都有主 `providers` Route 和兜底 `providers_fallback` Route；两组数组同时决定启用状态和 `auto` 顺序，CLI 只在原分组内部调整成员顺序。
 
@@ -121,7 +121,7 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 
 ```json
 {
-  "$schema": "https://unpkg.com/web-access-cli@0.5.0/schemas/config.schema.json",
+  "$schema": "https://unpkg.com/web-access-cli@0.6.0/schemas/config.schema.json",
   "providers": [
     {
       "id": "exa_team",
@@ -161,20 +161,20 @@ CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两�
 }
 ```
 
-内置 Instance 为 `tavily`、`exa`、`bocha`、`yuanbao`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`、`xcrawl`、`deepseek`、`xai_x_search`、`xai_web_search`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。出现在对应主 Route 或 fallback Route 中的实例才启用。Bocha 默认 base URL 为 `https://api.bocha.cn`，必须配置 API key；元宝搜索默认 base URL 为 `https://api.wsa.cloud.tencent.com`，必须配置服务 API KEY；AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用；XCrawl 默认 base URL 为 `https://run.xcrawl.com`，必须配置 API key；DeepSeek 默认 base URL 为 `https://api.deepseek.com/anthropic/v1`，必须配置 API key。
+内置 Instance 为 `tavily`、`exa`、`bocha`、`yuanbao`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`、`xcrawl`、`deepseek`、`xai_x_search`、`xai_web_search`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。出现在对应主 Route 或 fallback Route 中的实例才启用。Bocha 默认 base URL 为 `https://api.bocha.cn`，必须配置 API key；元宝搜索默认 base URL 为 `https://api.wsa.cloud.tencent.com`，必须配置服务 API KEY；AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用；XCrawl 默认 base URL 为 `https://run.xcrawl.com`，必须配置 API key；DeepSeek 默认 base URL 为 `https://api.deepseek.com`，必须配置 API key。
 
 默认 Route：
 
-- Search 主轮：`tavily -> exa -> bocha -> yuanbao -> brave -> searxng -> anysearch -> xcrawl`
-- Search fallback：`deepseek -> xai_x_search -> xai_web_search`
-- Extract 主轮：`firecrawl -> jina -> exa -> anysearch -> xcrawl`
+- Search 主轮：`tavily -> exa -> bocha -> yuanbao -> brave -> searxng -> anysearch -> xcrawl -> deepseek`
+- Search fallback：`xai_x_search -> xai_web_search`
+- Extract 主轮：`firecrawl -> jina -> exa -> anysearch -> xcrawl -> deepseek`
 - Extract fallback：`http`
 
 默认 Route 将内置 provider 分为主轮和 fallback。自定义 ID 会合并到 Instance 列表，但仍需显式加入 Route；省略能力 Route 时使用上述默认分组，Search 主 Route 显式空数组会报错，Extract 主 Route 可以显式为空以禁用 Extract。`auto` 会跳过未完成配置的 Instance。AnySearch 与 XCrawl 可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
 
 元宝搜索调用腾讯云 `POST /SearchPro`，使用 Bearer 服务 API KEY 和小写驼峰请求体（`Query`，可选 `Site` 与 `Freshness`）。单个 `site:` 指定域名改写为 `Site=<domain>`，不超过五个排除域名改写为 `Site=exclude:<domain>|<domain>`，其余组合只在本地过滤。`Pages` 的每一项都是 JSON 字符串，映射为 `title`/`url`/`snippet`，摘要优先取标准摘要 `passage`，其次才是动态摘要 `content`。HTTP 200 中返回的 `UnauthorizedOperation`、`ResourceNotFound` 等业务错误保持可回退，`auto` 会继续尝试下一个 Provider。该 Provider 仅支持 Search；`--limit` 不超过 10 时不发送 `Cnt`，以免极速版拒绝请求，超出时按 10 向上取整发送（上限 50）。
 
-DeepSeek Search 通过 Anthropic-compatible Messages API 调用原生 `web_search_20250305` server tool，一次搜索是完整模型轮次，因此延迟和成本可能高于专用搜索 endpoint。它位于默认 Search fallback，仅在全部主轮 Provider 未配置、返回最终非 2xx HTTP 响应或发生其他可恢复失败后触发。Adapter 只接受 `web_search_tool_result` 中的结构化 URL，按 URL 合并 citation 摘要，绝不从模型 prose 中猜测 URL。域名条件会改写查询并在本地再次严格过滤；DeepSeek 不支持 `freshness`，遇到该参数时以可恢复错误跳过；重定向会被严格拒绝，且不会访问 `Location` 目标。Provider 私有的 `encrypted_content` 是 CLI 无法展示或解码的 opaque payload，不具备诊断价值，因此会从 `raw` 中移除。
+DeepSeek 使用官方工具 API：Search 请求 `{baseUrl}/v1/tools/search`，Fetch 请求 `{baseUrl}/v1/tools/fetch`，都以 Bearer 携带 `DEEPSEEK_API_KEY`。Search 发送 `count` 和 `need_content: false`，从 `results` 映射 `title`/`url`/`snippet`，仅在 `snippet` 为空时回退到更长的 `summary`，其余字段保留在 `raw`。官方 Search 没有 `freshness` 字段，因此改写为文档支持的 `after:` 搜索语法，域名条件使用 `site:`/`-site:`；两者都只是远端提示，结果仍在本地严格复核，拼接后超过 128 字符上限时丢弃远端提示并保留原始查询。Fetch 用 `content` 作为 Markdown 正文、`title` 作为标题；HTTP 404 或正文为空返回可回退的 `no_usable_content`。401 为 `auth_error`，402 为 `quota_exceeded`，429 为 `rate_limited`，其余状态为 `provider_error`；400/401/402/403 不会重试同一 Provider。
 
 XAI hosted Search 使用 `XAI_AUTH_JSON` 指向外部 OAuth JSON 文件，每次调用只读取 `access_token`，由外部 CLIProxyAPI 负责刷新和回写。可用 `authJson`/`authJsonEnv` 与 `model`/`modelEnv` 为实例覆盖路径和模型。`xai_web_search` 支持最多 5 个 allow 或 exclude 域名（两者不能同时使用）；`xai_x_search` 不接受 `freshness`。模型搜索可能需要更长时间；Search 默认单次超时 60 秒、总超时 120 秒。
 
@@ -194,7 +194,7 @@ XAI hosted Search 使用 `XAI_AUTH_JSON` 指向外部 OAuth JSON 文件，每次
 | HTTP | 无 | 无 |
 | AnySearch | `ANYSEARCH_API_KEY`，可选 | `ANYSEARCH_BASE_URL`，默认 `https://api.anysearch.com` |
 | XCrawl | `XCRAWL_API_KEY` | `XCRAWL_BASE_URL`，默认 `https://run.xcrawl.com` |
-| DeepSeek | `DEEPSEEK_API_KEY` | 无标准环境变量；默认 `https://api.deepseek.com/anthropic/v1` |
+| DeepSeek | `DEEPSEEK_API_KEY` | 无标准环境变量；默认 `https://api.deepseek.com` |
 | xAI Search | `XAI_AUTH_JSON` | 无标准环境变量；默认 `https://cli-chat-proxy.grok.com/v1`，模型 `grok-4.6` |
 
 自定义 Instance 使用 `apiKeyEnv` 和 `baseUrlEnv` 指定自己的环境变量。所有远端 Provider 都可以设置 `baseUrl` 和附加 `headers`。公共 `api.firecrawl.dev` 需要 key；自托管 Firecrawl v2 可以不设置 key。

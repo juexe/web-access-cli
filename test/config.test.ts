@@ -191,19 +191,19 @@ test("元宝搜索不能进入 Extract route 或配置 searchFilterMode", () => 
 	}
 });
 
-test("DeepSeek 使用标准 key、通用覆盖和 Search-only capability", () => {
+test("DeepSeek 使用标准 key、通用覆盖和 Search+Extract capability", () => {
 	const fixture = configFile({
 		providers: [
 			{
 				id: "deepseek",
 				type: "deepseek",
 				apiKey: "config-key",
-				baseUrl: "https://deepseek.internal/anthropic/v1/",
+				baseUrl: "https://deepseek.internal/v1/",
 				headers: { "X-Team": "search" },
 			},
 		],
 		search: { providers: ["deepseek"] },
-		extract: { providers: ["http"] },
+		extract: { providers: ["deepseek"] },
 	});
 	try {
 		const loaded = loadConfig(fixture.path, {
@@ -213,18 +213,18 @@ test("DeepSeek 使用标准 key、通用覆盖和 Search-only capability", () =>
 		const deepseek = loaded.instances.find((item) => item.id === "deepseek");
 		assert.equal(deepseek?.apiKey, "env-key");
 		assert.equal(deepseek?.credentialSource, "standard_env");
-		assert.equal(deepseek?.baseUrl, "https://deepseek.internal/anthropic/v1");
+		assert.equal(deepseek?.baseUrl, "https://deepseek.internal/v1");
 		assert.equal(deepseek?.baseUrlSource, "config");
 		assert.equal(deepseek?.headers["X-Team"], "search");
 		assert.equal(capabilitySupports("deepseek", "search"), true);
-		assert.equal(capabilitySupports("deepseek", "extract"), false);
+		assert.equal(capabilitySupports("deepseek", "extract"), true);
 		const provider = (
 			executeProviders(loaded).data as {
 				providers: Array<Record<string, unknown>>;
 			}
 		).providers.find((item) => item.id === "deepseek");
-		assert.deepEqual(provider?.capabilities, ["search"]);
-		assert.deepEqual(provider?.routes, { search: true, extract: false });
+		assert.deepEqual(provider?.capabilities, ["search", "extract"]);
+		assert.deepEqual(provider?.routes, { search: true, extract: true });
 		assert.equal(executeDoctor(loaded).ok, true);
 	} finally {
 		fixture.cleanup();
@@ -241,7 +241,7 @@ test("DeepSeek 默认 endpoint 固定且缺少 key 时 doctor 失败", () => {
 			DEEPSEEK_BASE_URL: "https://ignored.example.com",
 		});
 		const deepseek = loaded.instances.find((item) => item.id === "deepseek");
-		assert.equal(deepseek?.baseUrl, "https://api.deepseek.com/anthropic/v1");
+		assert.equal(deepseek?.baseUrl, "https://api.deepseek.com");
 		assert.equal(deepseek?.baseUrlSource, "default");
 		assert.equal(deepseek?.apiKey, null);
 		assert.equal(executeDoctor(loaded).ok, false);
@@ -372,18 +372,20 @@ test("不支持过滤策略的 instance 拒绝 searchFilterMode", () => {
 	}
 });
 
-test("DeepSeek 不能进入 Extract route 或配置 searchFilterMode", () => {
-	const extract = configFile({ extract: { providers: ["deepseek"] } });
+test("DeepSeek 可以进入 Extract route 但不能配置 searchFilterMode", () => {
+	const supported = configFile({ extract: { providers: ["deepseek"] } });
 	const filterMode = configFile({
 		providers: [
 			{ id: "deepseek", type: "deepseek", searchFilterMode: "strict" },
 		],
 	});
 	try {
-		assert.throws(() => loadConfig(extract.path, {}), isConfigError);
+		assert.deepEqual(loadConfig(supported.path, {}).app.extract.providers, [
+			"deepseek",
+		]);
 		assert.throws(() => loadConfig(filterMode.path, {}), isConfigError);
 	} finally {
-		extract.cleanup();
+		supported.cleanup();
 		filterMode.cleanup();
 	}
 });
@@ -470,9 +472,9 @@ test("缺省 route 按主轮与 fallback 分组，Search 主轮不能为空", ()
 			"searxng",
 			"anysearch",
 			"xcrawl",
+			"deepseek",
 		]);
 		assert.deepEqual(loaded.app.search.providers_fallback, [
-			"deepseek",
 			"xai_x_search",
 			"xai_web_search",
 		]);
@@ -482,6 +484,7 @@ test("缺省 route 按主轮与 fallback 分组，Search 主轮不能为空", ()
 			"exa",
 			"anysearch",
 			"xcrawl",
+			"deepseek",
 		]);
 		assert.deepEqual(loaded.app.extract.providers_fallback, ["http"]);
 		const emptySearch = configFile({ search: { providers: [] } });
