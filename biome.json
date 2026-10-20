@@ -6,6 +6,7 @@
 			"!dist",
 			"!node_modules",
 			"!temp",
+			"!personal",
 			"!.artifacts",
 			"!schemas/*.schema.json"
 		]

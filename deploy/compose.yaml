@@ -1,0 +1,54 @@
+name: web-access-cli
+
+services:
+  gateway:
+    image: ${WEB_ACCESS_IMAGE:-web-access-cli:local}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: 2
+    stop_grace_period: 15s
+    ports:
+      - "${WEB_ACCESS_BIND:-127.0.0.1:18180}:8080"
+    environment:
+      WEB_ACCESS_CONFIG: /run/secrets/provider-config.json
+      WEB_ACCESS_GATEWAY_API_KEY_FILE: /run/secrets/gateway-api-key
+      WEB_ACCESS_GATEWAY_HOST: 0.0.0.0
+      WEB_ACCESS_GATEWAY_PORT: "8080"
+    secrets:
+      - provider-config.json
+      - gateway-api-key
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+secrets:
+  provider-config.json:
+    file: ${WEB_ACCESS_SECRET_PROVIDER_CONFIG:-../personal/secrets/provider-config.json}
+  gateway-api-key:
+    file: ${WEB_ACCESS_SECRET_GATEWAY_KEY:-../personal/secrets/gateway-api-key}

@@ -31,6 +31,13 @@ import {
 	type SearchSuccessEnvelope,
 } from "./types.ts";
 
+export interface ExtractPreflightOverride {
+	/** Upper bound for the source Markdown probe, including its request. */
+	timeoutMs: number;
+	/** Acceptance threshold for the probe only; normal extraction is unchanged. */
+	minContentCharacters: number;
+}
+
 export interface ExecutionContext {
 	loaded: LoadedConfig;
 	transport?: HttpTransport;
@@ -38,6 +45,11 @@ export interface ExecutionContext {
 	now?: () => number;
 	debug?: boolean;
 	persistProviderOrder?: PersistProviderOrder;
+	/**
+	 * Optional per-call override for the source Markdown preflight. Only the HTTP
+	 * gateway sets it; CLI behavior without it is unchanged.
+	 */
+	extractPreflight?: ExtractPreflightOverride;
 }
 
 interface RunResult<T> {
@@ -274,11 +286,13 @@ async function runProviders<T>(options: {
 		const remaining = options.totalTimeoutMs - elapsed(started, now);
 		if (remaining > 0) {
 			const preflightStarted = now();
+			const preflightTimeoutMs = Math.min(
+				remaining,
+				options.context.extractPreflight?.timeoutMs ?? options.attemptTimeoutMs,
+			);
 			const preflightSignal = AbortSignal.any([
 				...(options.context.signal ? [options.context.signal] : []),
-				AbortSignal.timeout(
-					Math.max(1, Math.min(remaining, options.attemptTimeoutMs)),
-				),
+				AbortSignal.timeout(Math.max(1, preflightTimeoutMs)),
 			]);
 			try {
 				const preferred = await options.preflight(
@@ -731,7 +745,9 @@ export async function executeExtract(
 				url: request.url,
 				signal,
 				maxResponseBytes: config.maxResponseBytes,
-				minContentCharacters: config.minContentCharacters,
+				minContentCharacters:
+					context.extractPreflight?.minContentCharacters ??
+					config.minContentCharacters,
 				instance,
 				transport,
 			});

@@ -126,7 +126,7 @@ export const AppConfigSchema = Type.Object(
 export const SearchRequestSchema = Type.Object({
 	query: Type.String({ minLength: 1 }),
 	provider: Type.String({ minLength: 1 }),
-	limit: Type.Integer({ minimum: 1, maximum: 20 }),
+	limit: Type.Integer({ minimum: 1, maximum: 50 }),
 	freshness: Type.Optional(FreshnessSchema),
 	includeDomains: Type.Array(Type.String()),
 	excludeDomains: Type.Array(Type.String()),

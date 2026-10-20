@@ -50,12 +50,15 @@ pnpm pack:check
 
 ```text
 src/cli.ts                 Commander CLI 与退出码
+src/server.ts              DeepSeek 兼容网关的独立进程入口
 src/config/                配置文件、环境变量与 Route 合并
 src/core/                  公共类型、schema、错误、路由和诊断
+src/gateway/               网关协议 schema、服务映射与 HTTP 边界
 src/providers/             Provider adapter、registry、HTTP/RSC 提取
 src/transport/             代理、超时、重定向和响应大小限制
 schemas/                   构建生成的 JSON Schema
 test/                      node:test 单元测试与本地 HTTP 集成测试
+deploy/                    网关公开部署模板、配置示例与运维说明
 ```
 
 Provider adapter 应只负责协议映射；fallback、deadline、attempts、envelope 和退出码由 `src/core` 统一处理。不要在 adapter 中引入 Pi、Claude Code、Codex 或其他 Agent 的生命周期和工具注册代码。
@@ -69,6 +72,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm pack:check
+pnpm test:docker
 ```
 
 `pnpm check` 会按上述顺序执行 lint、类型检查、测试和构建。修改 `src/core/schema.ts` 后必须重新运行 `pnpm build`，并提交更新后的 `schemas/*.schema.json`。Provider 测试应使用 `test/helpers.ts` 的 mock transport 或本地 HTTP server，不依赖真实 API key 和外网稳定性。
@@ -261,6 +265,53 @@ title: "Example title"
 - `130`：用户取消
 
 `providers` 会列出每个 Instance 的 Type、能力、Route 启用状态、凭据来源和 base URL 来源；`searchRoute`/`searchFallbackRoute` 与 `extractRoute`/`extractFallbackRoute` 是下一次 `auto` 使用的两组有效顺序。`doctor` 只做本地配置检查，不主动调用远端 API；当已启用 Route 中存在未配置 Instance 时，命令返回 `doctor_failed` 和退出码 `1`。
+
+## DeepSeek 兼容 HTTP 网关
+
+仓库另外提供一个**独立**的 HTTP 服务，把同样的 provider、路由和传输实现包装成 DeepSeek 工具协议。它不是 CLI 的替代品：CLI 的命令、退出码、schema v2 envelope 和 npm bin 契约都不变。
+
+```sh
+# 源码运行（默认监听 127.0.0.1:8080）
+WEB_ACCESS_CONFIG=~/.config/web-access-cli/config.json \
+WEB_ACCESS_GATEWAY_API_KEY_FILE=/path/to/gateway-api-key \
+pnpm start:gateway     # 或 node --import tsx src/server.ts
+
+# 构建后运行
+node dist/server.js
+```
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/v1/tools/search` | DeepSeek Search 兼容 |
+| `POST` | `/v1/tools/fetch` | DeepSeek Fetch 兼容 |
+| `GET` | `/healthz` | 进程存活，无需鉴权 |
+| `GET` | `/readyz` | 配置/生命周期就绪，无需鉴权 |
+
+网关只从文件读取独立的 Bearer Key（`WEB_ACCESS_GATEWAY_API_KEY_FILE`），使用 Node crypto 做定长摘要比较，并拒绝重复 `Authorization`。入站请求体按流计数，上限 64 KiB，读取超时 10 秒；全服务最多 4 个在途工具请求，满额返回 429。成功与错误都使用 `Cache-Control: no-store`。
+
+请求字段与官方一致：
+
+| 字段 | 行为 |
+| --- | --- |
+| `query` | 必填，1–128 个 Unicode 字符，不能全为空白；原样保留搜索语法 |
+| `count` | 1–50 的整数，缺省 10 |
+| `ori_question` | 可省略或 `null`；非 null 时 1–128 个字符 |
+| `localization` | 可省略，默认空字符串；非空必须是 IP 地址 |
+| `need_content` | 可省略，默认 `false`；必须是布尔值 |
+
+Fetch 只接受非空、最长 8192 字符、含 hostname、无 userinfo 的绝对 HTTP(S) URL。未知请求字段会被忽略，且无法通过未知字段指定 provider、凭据、timeout 或配置。
+
+**响应是协议兼容而非与官方搜索引擎等价**：`summary` 直接复制 `snippet`，`rerank_score` 恒为 `0`，`authority` 恒为 `-1`，`site_name`/`site_icon`/`date` 恒为 `null`。占位评分**不是** DeepSeek 的质量评分；依赖 `rerank_score >= 1.5` 或 `authority >= 3` 筛选的客户端必须调整策略，否则会过滤掉全部结果。网关不承诺结果数量、排序或摘要质量与官方一致，也不跨 provider 凑数或重新分页。
+
+`ori_question` 与 `localization` 本期接受并校验，但中立核心没有对应能力，因此不影响 provider 请求，也不会拼进 `query`。
+
+`need_content=true` 时为每条结果补抓正文：按排名顺序、最多两路并发、总预算 30 秒、单篇 10 秒、每次 provider 尝试 3 秒。失败、超时或超限的正文留空但结果保留；单篇正文最多 256 KiB（JSON 编码后），完整响应最多 8 MiB，超限时从低排名起清空 `content`。**补抓会消耗 extract 上游额度。**
+
+网关为 Fetch 与补抓派生自己的配置，正文最短阈值降为 1 个字符，因此有效短页面会成功；源站 `.md` 猜测仍要求至少 500 字符（或原配置阈值取大者），避免短小的 `Not found` 页面误命中。搜索和 Fetch 各用现有配置的总超时，补抓有独立的 30 秒窗口；客户端断开会取消在途工作。
+
+错误统一为 `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`：400 输入错误、401 `invalid_api_key`、402 额度不足、404 无可用正文或直连目标不可用、408 读取请求体超时、413 请求体过大、429 限流（带 `Retry-After`）、504 下游超时、500 凭据/配置/未知失败/输出超限。目标站点的 401/403 属于 Fetch 不可用；云 provider 的 401/403 返回 500。
+
+网关不写回 provider 顺序，也不修改配置：服务运行期间使用启动时加载的配置快照。部署方式、Docker Compose 模板、secret 挂载、诊断、升级与回滚见 [deploy/README.md](deploy/README.md)；架构决策见 [docs/adr/0019-deepseek-tool-gateway.md](docs/adr/0019-deepseek-tool-gateway.md)。
 
 ## HTTP 与安全边界
 

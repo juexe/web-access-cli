@@ -158,7 +158,7 @@ function businessFailure(
 		retryable = false;
 	} else if (status === 402) code = "quota_exceeded";
 	else if (status === 429) code = "rate_limited";
-	else if (status === 504) code = "timeout";
+	else if (status === 408 || status === 504) code = "timeout";
 	const message = redactText(upstreamMessage(parsed.message ?? parsed.error), [
 		...sensitiveValues(parsed),
 		request.instance.apiKey,
@@ -184,10 +184,12 @@ const anysearch: ProviderAdapter = {
 				"AnySearch 严格模式不支持 freshness",
 				{ provider: ref(request.instance), retryable: true },
 			);
+		// AnySearch caps max_results at 10, including the candidate pool used for
+		// local domain filtering.
 		const maxResults =
 			request.includeDomains.length || request.excludeDomains.length
-				? 20
-				: request.limit;
+				? 10
+				: Math.min(request.limit, 10);
 		const headers = providerHeaders(request.instance, {
 			"Content-Type": "application/json",
 			Accept: "application/json",

@@ -1109,3 +1109,108 @@ test("显式 provider 和用户取消不更新内部顺序", async () => {
 		fixture.cleanup();
 	}
 });
+
+test("extractPreflight 覆盖探针门槛，正常提取仍接受短正文", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: {
+			providers: ["jina"],
+			providers_fallback: ["http"],
+			minContentCharacters: 1,
+		},
+	});
+	try {
+		const transport = new MockTransport((url) => {
+			if (url.endsWith(".md"))
+				return response("Not found", { contentType: "text/markdown" });
+			if (url.startsWith("https://r.jina.ai/"))
+				return response("missing", { status: 404 });
+			return response("ok", { contentType: "text/plain; charset=utf-8" });
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{
+				loaded: fixture.loaded,
+				transport,
+				extractPreflight: { timeoutMs: 500, minContentCharacters: 500 },
+			},
+		);
+		assert.equal(envelope.ok, true);
+		if (!hasProvider(envelope)) return;
+		assert.equal(envelope.provider, "http");
+		if (!("document" in envelope.data)) return;
+		assert.equal(envelope.data.document.content, "ok");
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("未提供 extractPreflight 时 CLI 探针门槛保持原配置", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: {
+			providers: ["http"],
+			minContentCharacters: 50,
+		},
+	});
+	try {
+		const transport = new MockTransport((url) => {
+			if (url.endsWith(".md"))
+				return response("short md", { contentType: "text/markdown" });
+			return response(`<p>${"long enough body ".repeat(10)}</p>`, {
+				contentType: "text/html; charset=utf-8",
+			});
+		});
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{ loaded: fixture.loaded, transport },
+		);
+		assert.equal(envelope.ok, true);
+		// The short .md variant is below the configured threshold, so the probe
+		// misses and the ordinary request wins.
+		assert.ok(transport.calls.some((call) => call.url.endsWith("/article")));
+		if (hasProvider(envelope) && "document" in envelope.data)
+			assert.match(envelope.data.document.content, /long enough body/);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test("extractPreflight 探针超时受覆盖值限制并继续原 route", async () => {
+	const fixture = loadedConfig({
+		search: { providers: ["tavily"] },
+		extract: {
+			providers: ["jina"],
+			providers_fallback: ["http"],
+			minContentCharacters: 1,
+		},
+	});
+	try {
+		const transport = new MockTransport(async (url) => {
+			if (url.endsWith(".md")) {
+				await new Promise((resolveWait) => setTimeout(resolveWait, 300));
+				return response("# never used", { contentType: "text/markdown" });
+			}
+			if (url.startsWith("https://r.jina.ai/"))
+				return response("missing", { status: 404 });
+			return response("fallback body", {
+				contentType: "text/plain; charset=utf-8",
+			});
+		});
+		const started = performance.now();
+		const envelope = await executeExtract(
+			{ url: "https://example.com/article", provider: "auto" },
+			{
+				loaded: fixture.loaded,
+				transport,
+				extractPreflight: { timeoutMs: 50, minContentCharacters: 1 },
+			},
+		);
+		const elapsedMs = performance.now() - started;
+		assert.equal(envelope.ok, true);
+		assert.ok(elapsedMs < 5000);
+		if (hasProvider(envelope)) assert.equal(envelope.provider, "http");
+	} finally {
+		fixture.cleanup();
+	}
+});

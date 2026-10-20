@@ -137,7 +137,7 @@ const xcrawl: ProviderAdapter = {
 					query: queryWithFilters(request),
 					limit:
 						request.includeDomains.length || request.excludeDomains.length
-							? 20
+							? Math.max(20, request.limit)
 							: request.limit,
 				}),
 				signal: request.signal,

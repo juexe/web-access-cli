@@ -797,3 +797,28 @@ test("CLI 通过符号链接入口运行时仍会执行主程序", () => {
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
+
+test("CLI --limit 21 仍被拒绝且输出单个 JSON envelope", async () => {
+	const result = await runCli(["search", "hello", "--limit", "21", "--json"]);
+	assert.equal(result.status, 2);
+	assert.equal(result.stderr, "");
+	const envelope = JSON.parse(result.stdout) as {
+		ok: boolean;
+		error?: { code: string };
+	};
+	assert.equal(envelope.ok, false);
+	assert.equal(envelope.error?.code, "invalid_input");
+});
+
+test("CLI --limit 50 仍按 CLI 契约拒绝，网关上限不泄漏到 CLI", async () => {
+	const result = await runCli(["search", "hello", "--limit", "50", "--json"]);
+	assert.equal(result.status, 2);
+	assert.equal(result.stderr, "");
+	const envelope = JSON.parse(result.stdout) as {
+		ok: boolean;
+		error?: { code: string; message: string };
+	};
+	assert.equal(envelope.ok, false);
+	assert.equal(envelope.error?.code, "invalid_input");
+	assert.match(envelope.error?.message ?? "", /20/);
+});

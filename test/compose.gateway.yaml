@@ -1,0 +1,35 @@
+# Compose overlay for the offline Docker smoke test (test/docker-smoke.mjs).
+# It replaces the runtime provider route with a deterministic in-network fixture
+# and never uses a real credential. Do not use this file for a real deployment.
+services:
+  fixture:
+    image: ${WEB_ACCESS_IMAGE:-web-access-cli:local}
+    entrypoint: ["node", "/fixture/gateway-upstream.mjs"]
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    pids_limit: 64
+    mem_limit: 128m
+    volumes:
+      - ../test/fixtures/gateway-upstream.mjs:/fixture/gateway-upstream.mjs:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:9911/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 1s
+
+  gateway:
+    depends_on:
+      fixture:
+        condition: service_healthy

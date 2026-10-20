@@ -505,3 +505,26 @@ test("旧下划线顺序字段直接报配置错误", () => {
 		fixture.cleanup();
 	}
 });
+
+test("配置 search.limit 上限仍为 20，core SearchRequest schema 上限为 50", async () => {
+	const { SearchRequestSchema } = await import("../src/core/schema.ts");
+	const { Check } = await import("typebox/value");
+	const request = {
+		query: "q",
+		provider: "auto",
+		limit: 50,
+		includeDomains: [],
+		excludeDomains: [],
+	};
+	assert.equal(Check(SearchRequestSchema, request), true);
+	assert.equal(Check(SearchRequestSchema, { ...request, limit: 51 }), false);
+	const over = configFile({ search: { limit: 21 } });
+	const allowed = configFile({ search: { limit: 20 } });
+	try {
+		assert.throws(() => loadConfig(over.path, {}), isConfigError);
+		assert.equal(loadConfig(allowed.path, {}).app.search.limit, 20);
+	} finally {
+		over.cleanup();
+		allowed.cleanup();
+	}
+});

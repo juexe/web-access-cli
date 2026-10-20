@@ -68,7 +68,9 @@ const tavily: ProviderAdapter = {
 		const body: Record<string, unknown> = {
 			query: request.query,
 			search_depth: "basic",
-			max_results: request.limit,
+			// Tavily rejects max_results above 20; cap only the outbound value so
+			// later providers in the same route keep the original request limit.
+			max_results: Math.min(request.limit, 20),
 			include_answer: false,
 			include_raw_content: false,
 			...(request.freshness ? { time_range: request.freshness } : {}),
@@ -210,7 +212,7 @@ const brave: ProviderAdapter = {
 			String(
 				request.includeDomains.length || request.excludeDomains.length
 					? 20
-					: request.limit,
+					: Math.min(request.limit, 20),
 			),
 		);
 		if (request.freshness)

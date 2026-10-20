@@ -48,6 +48,28 @@ jobs:
       - name: 确认生成 Schema 已提交
         run: git diff --exit-code -- schemas/
 
+  docker:
+    name: Docker smoke (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11.16.0
+      - name: 安装 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 离线 Compose smoke（fixture provider，无真实凭据）
+        run: pnpm test:docker
+
   package:
     name: Package
     needs: check
@@ -85,7 +107,7 @@ jobs:
               *) printf 'Unexpected package entry: %s\n' "$entry" >&2; exit 1 ;;
             esac
           done <<< "$contents"
-          for required in package/dist/cli.js package/schemas/config.schema.json package/schemas/extractRequest.schema.json package/schemas/output.schema.json package/schemas/searchRequest.schema.json package/LICENSE package/package.json package/README.md package/README_CN.md package/THIRD_PARTY_NOTICES.md; do
+          for required in package/dist/cli.js package/dist/server.js package/dist/gateway/server.js package/schemas/config.schema.json package/schemas/extractRequest.schema.json package/schemas/output.schema.json package/schemas/searchRequest.schema.json package/schemas/gatewaySearchRequest.schema.json package/schemas/gatewaySearchResponse.schema.json package/schemas/gatewayFetchRequest.schema.json package/schemas/gatewayFetchResponse.schema.json package/schemas/gatewayError.schema.json package/LICENSE package/package.json package/README.md package/README_CN.md package/THIRD_PARTY_NOTICES.md; do
             grep -Fxq "$required" <<< "$contents"
           done
       - name: 验证打包后的 CLI
@@ -106,3 +128,11 @@ jobs:
           test "$status" -eq 2
           test ! -s "$install_dir/stderr.txt"
           node -e 'const value = JSON.parse(process.argv[1]); if (value.ok !== false || value.error?.code !== "invalid_input") process.exit(1)' "$stdout"
+
+          # The gateway entry must be importable and fail cleanly without a key file.
+          set +e
+          gateway_stderr="$(node "$install_dir/node_modules/web-access-cli/dist/server.js" 2>&1)"
+          gateway_status=$?
+          set -e
+          test "$gateway_status" -eq 1
+          printf '%s' "$gateway_stderr" | grep -q 'WEB_ACCESS_GATEWAY_API_KEY_FILE'

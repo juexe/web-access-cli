@@ -42,3 +42,6 @@ Desktop.ini
 /docs/
 AGENTS.md
 CONTEXT.md
+/.agents/
+/personal/
+/secrets/

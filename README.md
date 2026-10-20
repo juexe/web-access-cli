@@ -50,12 +50,15 @@ pnpm pack:check
 
 ```text
 src/cli.ts                 Commander CLI and exit codes
+src/server.ts              Standalone DeepSeek-compatible gateway entry point
 src/config/                Configuration files, environment variables, and route merging
 src/core/                  Public types, schemas, errors, routing, and diagnostics
+src/gateway/               Gateway protocol schema, service mapping, and HTTP boundary
 src/providers/             Provider adapters, registry, and HTTP/RSC extraction
 src/transport/             Proxies, timeouts, redirects, and response size limits
 schemas/                   Generated JSON Schemas
 test/                      node:test unit tests and local HTTP integration tests
+deploy/                    Public gateway Compose template, env/config examples, operations guide
 ```
 
 Provider adapters should handle protocol mapping only. Fallback, deadlines, attempts, envelopes, and exit codes are managed centrally by `src/core`. Do not add lifecycle or tool registration code for Pi, Claude Code, Codex, or any other agent to an adapter.
@@ -69,6 +72,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm pack:check
+pnpm test:docker
 ```
 
 `pnpm check` runs linting, type checking, tests, and the build in that order. After changing `src/core/schema.ts`, run `pnpm build` again and commit the updated `schemas/*.schema.json` files. Provider tests should use the mock transport or local HTTP server from `test/helpers.ts`; they must not depend on real API keys or external network reliability.
@@ -261,6 +265,53 @@ Exit codes:
 - `130`: User cancellation
 
 `providers` lists each instance's type, capabilities, route status, credential source, and base URL source. Its `searchRoute`/`searchFallbackRoute` and `extractRoute`/`extractFallbackRoute` fields show the two effective orders for the next `auto` call. `doctor` performs local configuration checks only and does not call remote APIs. If an enabled route contains an unconfigured instance, the command returns `doctor_failed` with exit code `1`.
+
+## DeepSeek-compatible HTTP gateway
+
+The repository also ships a **separate** HTTP service that wraps the same provider, route and transport implementations in the DeepSeek tool protocol. It is not a replacement for the CLI: commands, exit codes, the schema v2 envelope and the npm bin contract are unchanged.
+
+```sh
+# From source (listens on 127.0.0.1:8080 by default)
+WEB_ACCESS_CONFIG=~/.config/web-access-cli/config.json \
+WEB_ACCESS_GATEWAY_API_KEY_FILE=/path/to/gateway-api-key \
+pnpm start:gateway     # or node --import tsx src/server.ts
+
+# Built output
+node dist/server.js
+```
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/v1/tools/search` | DeepSeek Search compatible |
+| `POST` | `/v1/tools/fetch` | DeepSeek Fetch compatible |
+| `GET` | `/healthz` | Process liveness, no authentication |
+| `GET` | `/readyz` | Configuration/lifecycle readiness, no authentication |
+
+The gateway reads its own Bearer key from a file only (`WEB_ACCESS_GATEWAY_API_KEY_FILE`), compares fixed-length digests with Node crypto, and rejects duplicate `Authorization` headers. Request bodies are counted as a stream with a 64 KiB cap and a 10-second read timeout; at most four tool requests may be in flight, and excess requests receive 429. Success and error responses use `Cache-Control: no-store`.
+
+Request fields match the official contract:
+
+| Field | Behavior |
+| --- | --- |
+| `query` | Required, 1–128 Unicode characters, not entirely whitespace; search operators are preserved |
+| `count` | Integer 1–50, default 10 |
+| `ori_question` | Optional or `null`; when non-null, 1–128 characters |
+| `localization` | Optional, default empty string; when non-empty it must be an IP address |
+| `need_content` | Optional, default `false`; must be a boolean |
+
+Fetch accepts only a non-empty absolute HTTP(S) URL of at most 8192 characters with a hostname and no userinfo. Unknown request fields are ignored and cannot select a provider, credential, timeout or configuration override.
+
+**Responses are protocol-compatible, not equivalent to the official search engine**: `summary` reuses `snippet`, `rerank_score` is always `0`, `authority` is always `-1`, and `site_name`/`site_icon`/`date` are always `null`. The placeholder score is **not** a DeepSeek quality score; clients filtering on `rerank_score >= 1.5` or `authority >= 3` must change strategy or they will drop every result. Result count, ranking and summary quality are not promised, and the gateway never paginates or merges providers to fill `count`.
+
+`ori_question` and `localization` are validated and accepted, but the neutral core has no equivalent capability, so they do not affect provider requests and are not folded into `query`.
+
+With `need_content=true`, content is backfilled in rank order with at most two concurrent tasks, a 30-second total window, 10 seconds per item, and a 3-second per-provider attempt cap. Failed, timed-out or over-limit content stays empty while the result is kept; one content value is capped at 256 KiB JSON-encoded UTF-8 and the complete response at 8 MiB, clearing content from the lowest ranks when needed. **Backfill spends extract provider quota.**
+
+The gateway derives its own config for Fetch and backfill with a 1-character minimum, so valid short pages succeed, while the source Markdown probe still requires at least 500 characters (or the original threshold, whichever is larger) so a short `Not found` page cannot win. Search and Fetch each use the configured total timeout; backfill has an independent 30-second window, and client disconnects cancel in-flight work.
+
+Errors are always `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`: 400 invalid input, 401 `invalid_api_key`, 402 insufficient quota, 404 no usable content or an unavailable direct target, 408 body read timeout, 413 body too large, 429 rate limited (with `Retry-After`), 504 upstream timeout, and 500 for credential/configuration failures, unknown failures or oversized output. Target-site 401/403 means Fetch is unavailable; cloud-provider 401/403 returns 500.
+
+The gateway never writes provider order and never modifies configuration: it uses the snapshot loaded at startup. Deployment, Docker Compose templates, secret mounts, diagnostics, upgrades and rollback are documented in [deploy/README.md](deploy/README.md); the architectural decision is in [docs/adr/0019-deepseek-tool-gateway.md](docs/adr/0019-deepseek-tool-gateway.md).
 
 ## HTTP and security boundaries
 

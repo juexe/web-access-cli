@@ -45,6 +45,8 @@
 		"lint": "biome check .",
 		"format": "biome format --write .",
 		"check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+		"start:gateway": "node dist/server.js",
+		"test:docker": "node test/docker-smoke.mjs",
 		"pack:check": "pnpm pack --pack-destination .artifacts"
 	},
 	"dependencies": {

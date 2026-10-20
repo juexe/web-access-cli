@@ -1,0 +1,13 @@
+# Build-context allowlist: only these paths are sent to the Docker daemon.
+# Everything else (.git, node_modules, dist, temp, .agents, docs, schemas, test,
+# deploy templates, .env and every local configuration or credential) stays out.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.json
+!tsconfig.build.json
+!src
+!scripts
+!LICENSE
+!THIRD_PARTY_NOTICES.md

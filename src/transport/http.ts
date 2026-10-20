@@ -156,6 +156,16 @@ export function buildEndpoint(baseUrl: string, path: string): string {
 export class DefaultHttpTransport implements HttpTransport {
 	private readonly dispatcher = new EnvHttpProxyAgent();
 
+	/** Gracefully close pooled sockets; safe to call once at process shutdown. */
+	async close(): Promise<void> {
+		await this.dispatcher.close();
+	}
+
+	/** Abort in-flight sockets; use after close() when a deadline expires. */
+	async destroy(): Promise<void> {
+		await this.dispatcher.destroy();
+	}
+
 	async request(
 		rawUrl: string | URL,
 		options: HttpRequestOptions,

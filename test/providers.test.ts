@@ -585,7 +585,7 @@ test("AnySearch Search 使用固定 REST 协议并执行本地域名过滤", asy
 		);
 		assert.deepEqual(JSON.parse(options.body ?? ""), {
 			query: "agent neutral web cli site:example.com -site:blocked.example.com",
-			max_results: 20,
+			max_results: 10,
 			format: "json",
 		});
 		return response({
@@ -1058,4 +1058,211 @@ test("RSC 后备解析器提取 Next.js flight payload", () => {
 	const markdown = extractRscMarkdown(html);
 	assert.match(markdown, /^# RSC 标题/);
 	assert.match(markdown, /React Server Components/);
+});
+
+test("各 provider 仅限制自身出站 count，且不修改共享 SearchRequest", async (t) => {
+	await t.test("Tavily 上限 20", async () => {
+		const transport = new MockTransport(() => response({ results: [] }));
+		const adapter = getAdapter("tavily", "search");
+		assert.ok(adapter?.search);
+		const request = searchRequest("tavily", transport);
+		request.limit = 50;
+		await adapter.search(request);
+		assert.equal(
+			JSON.parse(transport.calls[0]?.options.body ?? "").max_results,
+			20,
+		);
+		assert.equal(request.limit, 50);
+	});
+
+	await t.test("Tavily 正常 limit 原样传递", async () => {
+		const transport = new MockTransport(() => response({ results: [] }));
+		const adapter = getAdapter("tavily", "search");
+		assert.ok(adapter?.search);
+		const request = searchRequest("tavily", transport);
+		request.limit = 7;
+		await adapter.search(request);
+		assert.equal(
+			JSON.parse(transport.calls[0]?.options.body ?? "").max_results,
+			7,
+		);
+	});
+
+	await t.test("Brave 无过滤上限 20，有过滤仍为 20", async () => {
+		for (const withFilters of [false, true]) {
+			const transport = new MockTransport(() =>
+				response({ web: { results: [] } }),
+			);
+			const adapter = getAdapter("brave", "search");
+			assert.ok(adapter?.search);
+			const request = searchRequest("brave", transport);
+			request.limit = 50;
+			if (!withFilters) {
+				request.includeDomains = [];
+				request.excludeDomains = [];
+			}
+			await adapter.search(request);
+			assert.equal(
+				new URL(transport.calls[0]?.url ?? "").searchParams.get("count"),
+				"20",
+			);
+			assert.equal(request.limit, 50);
+		}
+	});
+
+	await t.test("AnySearch 普通与过滤候选池均为 10", async () => {
+		for (const withFilters of [false, true]) {
+			const transport = new MockTransport(() =>
+				response({ code: 0, data: { results: [] } }),
+			);
+			const adapter = getAdapter("anysearch", "search");
+			assert.ok(adapter?.search);
+			const request = searchRequest("anysearch", transport);
+			request.freshness = undefined;
+			request.limit = 50;
+			if (!withFilters) {
+				request.includeDomains = [];
+				request.excludeDomains = [];
+			}
+			await adapter.search(request);
+			assert.equal(
+				JSON.parse(transport.calls[0]?.options.body ?? "").max_results,
+				10,
+			);
+			assert.equal(request.limit, 50);
+		}
+	});
+
+	await t.test("Exa 与 Bocha 接受 50", async () => {
+		const exaTransport = new MockTransport(() => response({ results: [] }));
+		const exaAdapter = getAdapter("exa", "search");
+		assert.ok(exaAdapter?.search);
+		const exaRequest = searchRequest("exa", exaTransport);
+		exaRequest.limit = 50;
+		await exaAdapter.search(exaRequest);
+		assert.equal(
+			JSON.parse(exaTransport.calls[0]?.options.body ?? "").numResults,
+			50,
+		);
+
+		const bochaTransport = new MockTransport(() =>
+			response({ code: 200, data: {} }),
+		);
+		const bochaAdapter = getAdapter("bocha", "search");
+		assert.ok(bochaAdapter?.search);
+		const bochaRequest = searchRequest("bocha", bochaTransport);
+		bochaRequest.limit = 50;
+		await bochaAdapter.search(bochaRequest);
+		assert.equal(
+			JSON.parse(bochaTransport.calls[0]?.options.body ?? "").count,
+			50,
+		);
+	});
+
+	await t.test("XCrawl 带过滤小请求仍为 20，count 50 请求 50", async () => {
+		const small = new MockTransport(() =>
+			response({ status: "completed", data: { data: [] } }),
+		);
+		const adapter = getAdapter("xcrawl", "search");
+		assert.ok(adapter?.search);
+		const smallRequest = searchRequest("xcrawl", small);
+		smallRequest.freshness = undefined;
+		smallRequest.limit = 3;
+		await adapter.search(smallRequest);
+		assert.equal(JSON.parse(small.calls[0]?.options.body ?? "").limit, 20);
+
+		const large = new MockTransport(() =>
+			response({ status: "completed", data: { data: [] } }),
+		);
+		const largeRequest = searchRequest("xcrawl", large);
+		largeRequest.freshness = undefined;
+		largeRequest.limit = 50;
+		await adapter.search(largeRequest);
+		assert.equal(JSON.parse(large.calls[0]?.options.body ?? "").limit, 50);
+	});
+
+	await t.test("SearXNG 保持现有实现且按原始 limit 规范化", async () => {
+		const many = Array.from({ length: 60 }, (_, index) => ({
+			title: `t${index}`,
+			url: `https://example.com/${index}`,
+			content: `s${index}`,
+		}));
+		const transport = new MockTransport(() => response({ results: many }));
+		const adapter = getAdapter("searxng", "search");
+		assert.ok(adapter?.search);
+		const request = searchRequest("searxng", transport);
+		request.includeDomains = [];
+		request.excludeDomains = [];
+		request.limit = 50;
+		const result = await adapter.search(request);
+		assert.equal(result.data.results.length, 50);
+		assert.equal(
+			new URL(transport.calls[0]?.url ?? "").searchParams.get("count"),
+			null,
+		);
+	});
+});
+
+test("AnySearch JSON 业务码 402/429/408/504 映射为稳定错误", async (t) => {
+	const cases = [
+		{ status: 402, expected: "quota_exceeded" },
+		{ status: 429, expected: "rate_limited" },
+		{ status: 408, expected: "timeout" },
+		{ status: 504, expected: "timeout" },
+	] as const;
+	for (const item of cases) {
+		await t.test(String(item.status), async () => {
+			const transport = new MockTransport(() =>
+				response({ code: item.status, message: `business ${item.status}` }),
+			);
+			const adapter = getAdapter("anysearch", "search");
+			assert.ok(adapter?.search);
+			const request = searchRequest("anysearch", transport);
+			request.freshness = undefined;
+			await assert.rejects(
+				adapter.search(request),
+				(error: unknown) =>
+					error instanceof WebAccessError &&
+					error.code === item.expected &&
+					error.retryable &&
+					error.httpStatus === undefined,
+			);
+		});
+	}
+});
+
+test("AnySearch 不解析 message 猜测 HTTP 状态", async () => {
+	const transport = new MockTransport(() =>
+		response({ code: 500, message: "HTTP 408 超时 429 限流" }),
+	);
+	const adapter = getAdapter("anysearch", "search");
+	assert.ok(adapter?.search);
+	const request = searchRequest("anysearch", transport);
+	request.freshness = undefined;
+	await assert.rejects(
+		adapter.search(request),
+		(error: unknown) =>
+			error instanceof WebAccessError && error.code === "provider_error",
+	);
+});
+
+test("AnySearch HTTP 504 映射为 timeout", async (t) => {
+	for (const status of [504]) {
+		await t.test(String(status), async () => {
+			const transport = new MockTransport(() =>
+				response("upstream timeout", { status }),
+			);
+			const adapter = getAdapter("anysearch", "search");
+			assert.ok(adapter?.search);
+			const request = searchRequest("anysearch", transport);
+			request.freshness = undefined;
+			await assert.rejects(
+				adapter.search(request),
+				(error: unknown) =>
+					error instanceof WebAccessError &&
+					error.code === "timeout" &&
+					error.httpStatus === status,
+			);
+		});
+	}
 });
