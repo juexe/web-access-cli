@@ -28,7 +28,7 @@ importers:
         version: 7.2.4
       typebox:
         specifier: ^1.3.11
-        version: 1.3.14
+        version: 1.3.34
       undici:
         specifier: ^8.10.0
         version: 8.10.0
@@ -557,8 +557,8 @@ packages:
     resolution: {integrity: sha512-I8yFsfRzmzK0WV1pNNOA4A7y4RDfFxPRxb3t+e3ui14qSGOxGtiSP6GjeX+Y6CHb7HYaFj7ECUD7VE5kQMZWGQ==}
     engines: {node: '>=18', npm: '>=9'}
 
-  typebox@1.3.14:
-    resolution: {integrity: sha512-uD3FHZb4St/7E7eY0YANSt+yZABDDlbeJbXhUU17x2GZLyHUiQ6+mxSpZhZtnJSjKy/7PZ49r7SDZHG4F3JsLw==}
+  typebox@1.3.34:
+    resolution: {integrity: sha512-wbnzrXXDW8xEFHDZZs2jo1MkhaYlKAY4FRhpBc1+2LF1fZVBGCXGdLEhA/Z/NBbgzJMFfeM8m7elKPa/+KxaUQ==}
 
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
@@ -935,7 +935,7 @@ snapshots:
     dependencies:
       '@mixmark-io/domino': 2.2.0
 
-  typebox@1.3.14: {}
+  typebox@1.3.34: {}
 
   typescript@7.0.2:
     optionalDependencies:
