@@ -1,0 +1,111 @@
+name: Publish gateway image
+
+on:
+  release:
+    types: [published]
+  # Backfill or re-run an already published tag (a re-published Release does not
+  # fire `release: published` again, so this is the only way to rebuild one).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已发布的标签，例如 v0.6.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghcr-publish-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: 检出发布标签
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          persist-credentials: false
+      - name: 验证镜像标签
+        id: release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event_name == 'release' && github.event.release.prerelease || '' }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "$RELEASE_TAG" = "v$version"
+          grep -Fq "export const VERSION = \"$version\";" src/version.ts
+
+          case "$version" in
+            *-*) case "$IS_PRERELEASE" in
+                   true|"") ;;
+                   *) echo "带 prerelease 后缀的版本不能标记为正式 Release" >&2; exit 1 ;;
+                 esac ;;
+            *) case "$IS_PRERELEASE" in
+                 true) echo "正式版本不能标记为 GitHub prerelease" >&2; exit 1 ;;
+               esac ;;
+          esac
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: 设置 QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - name: 设置 Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: 登录 GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 计算镜像元数据
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=${{ steps.release.outputs.version }}
+            type=raw,value=latest,enable=${{ !contains(steps.release.outputs.version, '-') }}
+          labels: |
+            org.opencontainers.image.title=web-access-cli gateway
+            org.opencontainers.image.description=DeepSeek-compatible Search and Fetch gateway
+            org.opencontainers.image.licenses=MIT
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+      - name: 验证 GHCR 镜像
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          for _ in {1..30}; do
+            if manifest="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' 2>/dev/null)"; then
+              # shellcheck disable=SC2016 # JS template literals stay inside single quotes on purpose
+              printf '%s' "$manifest" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const m=JSON.parse(d);const arches=(m.manifests||[]).map(x=>x.platform?.architecture);for(const want of ["amd64","arm64"]){if(!arches.includes(want)){console.error(`镜像缺少 ${want} 架构: ${arches}`);process.exit(1)}}console.log(`镜像架构就绪: ${arches}`)})'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "GHCR 未在 5 分钟内返回镜像 $IMAGE:$VERSION" >&2
+          exit 1

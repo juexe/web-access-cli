@@ -2,7 +2,10 @@ name: web-access-cli
 
 services:
   gateway:
-    image: ${WEB_ACCESS_IMAGE:-web-access-cli:local}
+    # Default: the multi-arch image published to GHCR on every GitHub Release.
+    # Keep the build stanza so a source checkout can still build locally with
+    # `docker compose ... build gateway`; `up` uses the image unless you pass --build.
+    image: ${WEB_ACCESS_IMAGE:-ghcr.io/juexe/web-access-cli:latest}
     build:
       context: ..
       dockerfile: Dockerfile

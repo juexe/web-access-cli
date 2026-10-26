@@ -1,6 +1,22 @@
 # DeepSeek 兼容网关部署指南
 
-本目录说明如何用 Docker Compose 运行 `web-access-cli` 的 DeepSeek Search/Fetch 兼容网关。网关复用本机已配置的 provider、路由和传输实现，只面向可信内网客户端。
+本目录说明如何用 Docker 运行 `web-access-cli` 的 DeepSeek Search/Fetch 兼容网关。镜像由 `.github/workflows/image.yml` 在 GitHub Release 发布时构建并推送到 GHCR，也可在 Actions 里对该工作流手动 `Run workflow` 并填已发布的标签来补发或重建。部署只需要拉镜像，不必在宿主机上装 Node.js 或 pnpm。网关复用已配置的 provider、路由和传输实现，只面向可信内网客户端。
+
+## 镜像
+
+| 项目 | 值 |
+| --- | --- |
+| 镜像 | `ghcr.io/juexe/web-access-cli` |
+| 标签 | `0.7.0` 等精确版本；正式 Release 另加 `latest`，prerelease 只有版本标签 |
+| 架构 | `linux/amd64`、`linux/arm64` |
+| 入口 | `node dist/server.js`，容器内监听 `0.0.0.0:8080` |
+| 用户 | UID/GID `1000:1000`，只读根文件系统下运行 |
+
+首次发布后需在 GitHub 的 package 设置里把可见性改为 public，在此之前下载需要 `docker login ghcr.io`。生产环境请固定精确版本标签，不要用 `latest`。
+
+```sh
+docker pull ghcr.io/juexe/web-access-cli:0.7.0
+```
 
 ## 目录约定
 
@@ -8,7 +24,7 @@
 
 ```text
 deploy/
-├── compose.yaml          # Compose 定义（构建上下文为仓库根）
+├── compose.yaml          # Compose 定义（直接拉取 GHCR 镜像）
 ├── .env.example          # 非敏感部署变量模板
 ├── config.example.json   # provider 配置模板（占位 Key）
 └── README.md             # 本文件
@@ -115,13 +131,13 @@ cp deploy/config.example.json personal/secrets/provider-config.json
 openssl rand -hex 32 > personal/secrets/gateway-api-key
 chmod 700 personal/secrets && chmod 600 personal/secrets/*
 
-# 2. 准备非敏感部署变量
+# 2. 准备非敏感部署变量；把 WEB_ACCESS_IMAGE 固定到要部署的版本
 cp deploy/.env.example personal/deploy.env
-# 按需设置 WEB_ACCESS_BIND / WEB_ACCESS_IMAGE；secret 默认指向 ../personal/secrets/
+# secret 默认指向 ../personal/secrets/，随 -f deploy/compose.yaml 的上下文解析
 
-# 3. 校验、构建、启动（-f 指定 deploy/compose.yaml）
+# 3. 拉取并启动
 docker compose -f deploy/compose.yaml --env-file personal/deploy.env config --quiet
-docker compose -f deploy/compose.yaml --env-file personal/deploy.env build gateway
+docker compose -f deploy/compose.yaml --env-file personal/deploy.env pull gateway
 docker compose -f deploy/compose.yaml --env-file personal/deploy.env up -d --wait gateway
 ```
 
@@ -158,7 +174,7 @@ curl -sS -X POST http://192.168.1.10:18180/v1/tools/search \
 | `WEB_ACCESS_GATEWAY_API_KEY_FILE` | 网关密钥文件路径；只从文件读取，拒绝空值、少于 12 字符、含空白或控制字符的值 |
 | `WEB_ACCESS_GATEWAY_HOST` | 监听地址，独立运行默认 `127.0.0.1`，Compose 设为 `0.0.0.0` |
 | `WEB_ACCESS_GATEWAY_PORT` | 监听端口，独立运行默认 `8080` |
-| `WEB_ACCESS_IMAGE` | Compose 使用的本地镜像标签 |
+| `WEB_ACCESS_IMAGE` | Compose 使用的镜像，默认 `ghcr.io/juexe/web-access-cli:latest`；生产固定到精确版本号 |
 | `WEB_ACCESS_BIND` | 宿主发布地址，默认 `127.0.0.1:18180` |
 | `WEB_ACCESS_SECRET_PROVIDER_CONFIG` | provider 配置 secret 的宿主路径 |
 | `WEB_ACCESS_SECRET_GATEWAY_KEY` | 网关密钥 secret 的宿主路径 |
@@ -196,17 +212,27 @@ docker compose -f deploy/compose.yaml --env-file personal/deploy.env logs --tail
 ## 升级与回滚
 
 ```sh
-# 记录当前版本
-docker image inspect --format '{{.Id}}' web-access-cli:local
+# 记录当前部署的版本
+docker compose -f deploy/compose.yaml --env-file personal/deploy.env images gateway
 
-# 升级：重新构建并重启（配置快照会重新加载）
-docker compose -f deploy/compose.yaml --env-file personal/deploy.env build gateway
+# 升级：改 personal/deploy.env 的 WEB_ACCESS_IMAGE 到新版本号后重拉重启
+docker compose -f deploy/compose.yaml --env-file personal/deploy.env pull gateway
 docker compose -f deploy/compose.yaml --env-file personal/deploy.env up -d --wait gateway
 
-# 回滚：恢复记录的本地镜像标签后重新 up
-docker tag <previous-image-id> web-access-cli:local
-docker compose -f deploy/compose.yaml --env-file personal/deploy.env up -d --wait gateway
+# 回滚：把 WEB_ACCESS_IMAGE 改回旧版本号，重复上面两条命令
 ```
+
+升级和回滚都不重建镜像，所以回滚到任意已发布版本都只需改一个环境变量。配置文件的挂载与密钥不受影响。
+
+从仓库源码构建镜像（仅在开发或验证未发布改动时）：
+
+```sh
+docker build -t web-access-cli:dev .
+WEB_ACCESS_IMAGE=web-access-cli:dev \
+  docker compose -f deploy/compose.yaml --env-file personal/deploy.env up -d --wait gateway
+```
+
+`WEB_ACCESS_IMAGE` 只是 Compose 的镜像名覆盖，`pull` 对本地构建的标签无效，所以源码调试时直接 `up`，不要 `pull`。
 
 首次部署回滚只需 `docker compose -f deploy/compose.yaml --env-file personal/deploy.env down`，保留配置和密钥文件。不要执行全局 `prune`、`down -v`、批量重启其他服务或递归修改权限。
 

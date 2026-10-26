@@ -5,334 +5,174 @@
 [![CI](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-一个 Agent-neutral 的网页能力 CLI。它把“搜索”和“网页正文提取”定义为稳定能力，把 Tavily、Exa、Bocha、元宝搜索、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、Firecrawl、Jina 等差异收敛到内部统一 schema。
+同一核心上的两个入口：面向直接调用的 **CLI**，以及面向常驻 Agent 运行时的 **DeepSeek 兼容 HTTP 网关**。两者都提供搜索与正文提取两项能力，把 Tavily、Exa、Bocha、元宝搜索、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、Firecrawl、Jina 等差异收敛到同一 schema。
 
-CLI 是主要产品形态，不绑定 Pi、Claude Code、Codex、Cursor、OpenCode 或其他 Agent。Skill、MCP 和 Agent 插件只能作为 CLI 上层 adapter 接入，不能污染核心能力和 Provider 实现。
+两个入口都不绑定 Pi、Claude Code、Codex、Cursor、OpenCode 或其他 Agent；Skill、MCP 和 Agent 插件只是上层 adapter，不进入核心。要求 Node.js 22.19+。
 
-## 能力与 provider
+## 能力
 
-| 能力 | Provider Type | 统一输出 |
+| 能力 | Provider 类型 | 规范化输出 |
 | --- | --- | --- |
 | `search` | Tavily、Exa、Bocha、元宝搜索、Brave、SearXNG、AnySearch、XCrawl、DeepSeek、xAI x_search、xAI web_search | `rank`、`title`、`url`、`snippet` |
 | `extract` | Firecrawl v2、Jina Reader、Exa Contents、AnySearch、XCrawl、DeepSeek Fetch、HTTP | Markdown `Document` |
 
-Provider Type 描述实现类型；Provider Instance 是一份可配置实例。一个 Type 可以有多个 Instance，例如 `exa_team` 和 `exa_personal`。每个能力都有主 `providers` Route 和兜底 `providers_fallback` Route；两组数组同时决定启用状态和 `auto` 顺序，CLI 只在原分组内部调整成员顺序。
+Provider 类型是具体实现，Provider 实例是该类型的一份配置，因此 `exa_team` 与 `exa_personal` 可以共存。每项能力都有主 `providers` 路由和 `providers_fallback` 路由，两者共同决定启用的实例和 `auto` 顺序。
 
 ## 安装
 
-要求 Node.js 22.19 或更高版本。
-
-从 npm 全局安装：
-
 ```sh
-npm install --global web-access-cli
+npm install --global web-access-cli    # 或 pnpm add --global web-access-cli
 web-access --help
 ```
 
-也可以使用 pnpm 安装：
+源码方式：`pnpm install --frozen-lockfile && pnpm check`。网关在同一份源码中运行（`node --import tsx src/server.ts`），构建后为 `pnpm start:gateway`；生产部署用 GHCR 上的镜像，Compose 模板与密钥约定见 [deploy/README.md](deploy/README.md)。
+
+目录：`src/cli.ts` 与 `src/server.ts` 是两个入口，`src/gateway/` 承载工具协议，`src/core/`、`src/providers/`、`src/transport/` 由两者共用。Adapter 只做协议映射，回退、超时、envelope 和退出码都在 `src/core`。
+
+## CLI
 
 ```sh
-pnpm add --global web-access-cli
-web-access --help
-```
-
-从源码开发：
-
-```sh
-git clone https://github.com/juexe/web-access-cli.git
-cd web-access-cli
-pnpm install --frozen-lockfile
-pnpm check
-pnpm pack:check
-```
-
-## 项目结构
-
-```text
-src/cli.ts                 Commander CLI 与退出码
-src/server.ts              DeepSeek 兼容网关的独立进程入口
-src/config/                配置文件、环境变量与 Route 合并
-src/core/                  公共类型、schema、错误、路由和诊断
-src/gateway/               网关协议 schema、服务映射与 HTTP 边界
-src/providers/             Provider adapter、registry、HTTP/RSC 提取
-src/transport/             代理、超时、重定向和响应大小限制
-schemas/                   构建生成的 JSON Schema
-test/                      node:test 单元测试与本地 HTTP 集成测试
-deploy/                    网关公开部署模板、配置示例与运维说明
-```
-
-Provider adapter 应只负责协议映射；fallback、deadline、attempts、envelope 和退出码由 `src/core` 统一处理。不要在 adapter 中引入 Pi、Claude Code、Codex 或其他 Agent 的生命周期和工具注册代码。
-
-## 开发工作流
-
-```sh
-pnpm install
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm pack:check
-pnpm test:docker
-```
-
-`pnpm check` 会按上述顺序执行 lint、类型检查、测试和构建。修改 `src/core/schema.ts` 后必须重新运行 `pnpm build`，并提交更新后的 `schemas/*.schema.json`。Provider 测试应使用 `test/helpers.ts` 的 mock transport 或本地 HTTP server，不依赖真实 API key 和外网稳定性。
-
-## 命令
-
-```sh
-web-access search "Agent-neutral web CLI"
 web-access search "TypeScript release" --provider exa --limit 10 --freshness month
 web-access search "browser automation" --include-domain example.com --exclude-domain blocked.example.com
-
-web-access extract https://example.com/article
 web-access extract https://example.com/article --provider http --timeout 30000
 web-access extract https://example.com/article --json
 
-web-access providers
-web-access doctor
-
-web-access config edit
-web-access --config "/path/to/config.json" config edit
-web-access config init
-web-access --config "/path/to/config.json" config init --json
+web-access providers          # 路由、能力、凭据与 URL 状态
+web-access doctor             # 仅本地配置检查，不联网
+web-access config init        # 按凭据环境变量生成配置
+web-access config edit        # 用 $VISUAL/$EDITOR 打开
 ```
 
-CLI 提供 `search`、`extract` 两个能力命令，`providers`、`doctor` 两个诊断命令，以及 `config init`、`config edit` 配置维护命令。当前版本不提供 batch/all、answer、PDF 专线、Node SDK 或通用 MCP 集成。仓库提供可选的 [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md)，仅供源码仓库使用，不包含在 npm 发布包中。
+通用选项：`--config <path>`、`--json`、`--help`、`--version`。能力命令输出面向人的 Markdown，`config init` 输出创建的文件路径，所有失败输出单个 JSON envelope。退出码：`0` 成功，`2` 输入/配置无效或 Provider 未启用，`1` 运行时或 doctor 失败，`130` 取消。
 
-### 通用选项
+不提供 batch/all、answer、PDF 专线、Node SDK 或通用 MCP。另有一个可选的 [Agent Skill](skills/web-access-cli/SKILL.md)，仅供源码仓库使用，不进入 npm 包。
 
-- `--config <path>`：显式指定配置文件。
-- `--json`：输出紧凑 schema v2 JSON envelope；不指定时，成功命令输出面向人的 Markdown，失败始终输出 JSON。
-- `--help`、`--version`：输出常规 CLI 帮助或版本文本。
+## HTTP 网关
 
-成功命令默认输出面向人的 Markdown。`search` 输出 YAML front matter 和编号结果列表；`extract` 输出 YAML front matter 和规范化后的 Markdown 正文；`providers`、`doctor` 和 `config edit` 输出标题和格式化 JSON 数据；`config init` 输出新配置的绝对路径。需要 schema v2 envelope 时显式追加 `--json`。提取失败（包括 `partial`）以及所有失败路径始终输出 JSON envelope。诊断信息不会混入 stdout。
+常驻进程，用 [DeepSeek Search 与 Fetch API](https://api-docs.deepseek.com/zh-cn/guides/search) 提供同一套 Provider、路由和传输：端点、鉴权头、请求字段和错误 envelope 均与官方一致，客户端只需改写 base URL，不改变 CLI 契约。
 
-## 配置
-
-配置是严格 JSON；未知字段会报错。CLI 只读取显式路径或用户级路径，不会向上查找项目目录中的配置文件。
-
-所有平台的默认路径均为 `~/.config/web-access-cli/config.json`，其中 `~` 表示当前用户的主目录。环境变量 `WEB_ACCESS_CONFIG` 可以指定其他路径；命令行 `--config` 优先级更高。
-
-`web-access config edit` 会在配置文件缺失时创建父目录和完整默认配置，再优先使用 `VISUAL`、其次使用 `EDITOR` 打开；变量值可以包含带引号的可执行文件路径和参数，解析时不会执行 shell，并将配置路径作为独立的最后一个参数传入。已有文件会原样打开，即使内容暂时不是有效 JSON 也不会被覆盖或格式化。命令只等待编辑器进程启动，不等待编辑器关闭。两个变量都未设置、格式无效或启动失败时返回 `open_failed`；如果配置刚刚创建成功，文件仍会保留以便手动编辑。
-
-`config init` 按标准凭据环境变量创建新配置，已存在文件时拒绝覆盖。它保留全部内置 Instance 定义，将检测到的 Search provider 写入主 Route，Search fallback 留空，将检测到的远程 Extract provider 写入主 Route，并把 `http` 放入 Extract fallback。能力命令使用 `auto` 成功或发生可回退失败后，会原子重排对应的 `providers` 或 `providers_fallback` 数组；成员不会跨组移动。旧的 `_providers` 和 `_providers_fallback` 字段会被严格配置校验拒绝。
-
-完整 JSON Schema 位于 [schemas/config.schema.json](schemas/config.schema.json)。示例：
-
-```json
-{
-  "$schema": "https://unpkg.com/web-access-cli@0.6.0/schemas/config.schema.json",
-  "providers": [
-    {
-      "id": "exa_team",
-      "type": "exa",
-      "apiKeyEnv": "TEAM_EXA_API_KEY",
-      "headers": {
-        "X-Team": "docs"
-      }
-    },
-    {
-      "id": "searx_local",
-      "type": "searxng",
-      "baseUrl": "http://127.0.0.1:8080"
-    },
-    {
-      "id": "firecrawl_local",
-      "type": "firecrawl",
-      "baseUrl": "http://127.0.0.1:3002"
-    }
-  ],
-  "search": {
-    "providers": ["searx_local", "exa_team", "brave"],
-    "providers_fallback": ["deepseek"],
-    "limit": 5,
-    "timeoutMs": 120000,
-    "attemptTimeoutMs": 60000,
-    "maxResponseBytes": 5242880
-  },
-  "extract": {
-    "providers": ["firecrawl_local", "jina", "exa_team"],
-    "providers_fallback": ["http"],
-    "timeoutMs": 120000,
-    "attemptTimeoutMs": 45000,
-    "maxResponseBytes": 5242880,
-    "minContentCharacters": 500
-  }
-}
-```
-
-内置 Instance 为 `tavily`、`exa`、`bocha`、`yuanbao`、`brave`、`searxng`、`firecrawl`、`jina`、`http`、`anysearch`、`xcrawl`、`deepseek`、`xai_x_search`、`xai_web_search`。配置同 ID 时会覆盖内置实例的字段；自定义 ID 可以创建同 Type 的额外实例。出现在对应主 Route 或 fallback Route 中的实例才启用。Bocha 默认 base URL 为 `https://api.bocha.cn`，必须配置 API key；元宝搜索默认 base URL 为 `https://api.wsa.cloud.tencent.com`，必须配置服务 API KEY；AnySearch 默认 base URL 为 `https://api.anysearch.com`，支持匿名调用；XCrawl 默认 base URL 为 `https://run.xcrawl.com`，必须配置 API key；DeepSeek 默认 base URL 为 `https://api.deepseek.com`，必须配置 API key。
-
-默认 Route：
-
-- Search 主轮：`tavily -> exa -> bocha -> yuanbao -> brave -> searxng -> anysearch -> xcrawl -> deepseek`
-- Search fallback：`xai_x_search -> xai_web_search`
-- Extract 主轮：`firecrawl -> jina -> exa -> anysearch -> xcrawl -> deepseek`
-- Extract fallback：`http`
-
-默认 Route 将内置 provider 分为主轮和 fallback。自定义 ID 会合并到 Instance 列表，但仍需显式加入 Route；省略能力 Route 时使用上述默认分组，Search 主 Route 显式空数组会报错，Extract 主 Route 可以显式为空以禁用 Extract。`auto` 会跳过未完成配置的 Instance。AnySearch 与 XCrawl 可设置 `searchFilterMode`：`strict`（默认，遇到 freshness 时跳过）或 `best_effort`（将日期改写为查询片段）。域名条件会改写查询并在本地再次严格过滤。XCrawl Extract 固定使用同步 Scrape 的 Markdown 输出；Map、Crawl 和异步任务不属于当前 CLI 能力。
-
-元宝搜索调用腾讯云 `POST /SearchPro`，使用 Bearer 服务 API KEY 和小写驼峰请求体（`Query`，可选 `Site` 与 `Freshness`）。单个 `site:` 指定域名改写为 `Site=<domain>`，不超过五个排除域名改写为 `Site=exclude:<domain>|<domain>`，其余组合只在本地过滤。`Pages` 的每一项都是 JSON 字符串，映射为 `title`/`url`/`snippet`，摘要优先取标准摘要 `passage`，其次才是动态摘要 `content`。HTTP 200 中返回的 `UnauthorizedOperation`、`ResourceNotFound` 等业务错误保持可回退，`auto` 会继续尝试下一个 Provider。该 Provider 仅支持 Search；`--limit` 不超过 10 时不发送 `Cnt`，以免极速版拒绝请求，超出时按 10 向上取整发送（上限 50）。
-
-DeepSeek 使用官方工具 API：Search 请求 `{baseUrl}/v1/tools/search`，Fetch 请求 `{baseUrl}/v1/tools/fetch`，都以 Bearer 携带 `DEEPSEEK_API_KEY`。Search 发送 `count` 和 `need_content: false`，从 `results` 映射 `title`/`url`/`snippet`，仅在 `snippet` 为空时回退到更长的 `summary`，其余字段保留在 `raw`。官方 Search 没有 `freshness` 字段，因此改写为文档支持的 `after:` 搜索语法，域名条件使用 `site:`/`-site:`；两者都只是远端提示，结果仍在本地严格复核，拼接后超过 128 字符上限时丢弃远端提示并保留原始查询。Fetch 用 `content` 作为 Markdown 正文、`title` 作为标题；HTTP 404 或正文为空返回可回退的 `no_usable_content`。401 为 `auth_error`，402 为 `quota_exceeded`，429 为 `rate_limited`，其余状态为 `provider_error`；400/401/402/403 不会重试同一 Provider。
-
-XAI hosted Search 使用 `XAI_AUTH_JSON` 指向外部 OAuth JSON 文件，每次调用只读取 `access_token`，由外部 CLIProxyAPI 负责刷新和回写。可用 `authJson`/`authJsonEnv` 与 `model`/`modelEnv` 为实例覆盖路径和模型。`xai_web_search` 支持最多 5 个 allow 或 exclude 域名（两者不能同时使用）；`xai_x_search` 将 `freshness` 映射为 hosted `x_search` 工具的 `from_date` 下界。模型搜索可能需要更长时间；Search 默认单次超时 60 秒、总超时 120 秒，而 `xai_x_search`/`xai_web_search` 可能超过 60 秒，作为主 provider 使用时应调高 `attemptTimeoutMs`。
-
-### 凭据和 URL
-
-环境变量优先于 JSON 中的明文 key。内置 Instance 支持这些标准变量：
-
-| Type | API key | Base URL |
-| --- | --- | --- |
-| Tavily | `TAVILY_API_KEY` | `TAVILY_BASE_URL` |
-| Exa | `EXA_API_KEY` | `EXA_BASE_URL` |
-| Bocha | `BOCHA_API_KEY` | `BOCHA_BASE_URL`，默认 `https://api.bocha.cn` |
-| Brave | `BRAVE_API_KEY` | `BRAVE_BASE_URL` |
-| SearXNG | 无 | `SEARXNG_BASE_URL`，必需 |
-| Firecrawl | `FIRECRAWL_API_KEY` | `FIRECRAWL_BASE_URL` |
-| Jina | `JINA_API_KEY`，可选 | `JINA_BASE_URL` |
-| HTTP | 无 | 无 |
-| AnySearch | `ANYSEARCH_API_KEY`，可选 | `ANYSEARCH_BASE_URL`，默认 `https://api.anysearch.com` |
-| XCrawl | `XCRAWL_API_KEY` | `XCRAWL_BASE_URL`，默认 `https://run.xcrawl.com` |
-| DeepSeek | `DEEPSEEK_API_KEY` | 无标准环境变量；默认 `https://api.deepseek.com` |
-| xAI Search | `XAI_AUTH_JSON` | 无标准环境变量；默认 `https://cli-chat-proxy.grok.com/v1`，模型 `grok-4.6` |
-
-自定义 Instance 使用 `apiKeyEnv` 和 `baseUrlEnv` 指定自己的环境变量。所有远端 Provider 都可以设置 `baseUrl` 和附加 `headers`。公共 `api.firecrawl.dev` 需要 key；自托管 Firecrawl v2 可以不设置 key。
-
-## 执行与回退
-
-`--provider auto` 先按 `providers` 顺序执行；只有主轮全部失败且结果可回退时才进入 `providers_fallback`：
-
-1. 未完成配置的实例会记录为失败 attempt 并跳过。
-2. Provider 返回的最终 HTTP 响应不在 2xx 范围时，包括鉴权、请求、限流和服务器错误，Router 会尝试下一个实例。
-3. 网络错误、超时、响应过大、无可用正文等其他可恢复错误也会继续 Route。
-4. 没有最终非 2xx 响应的不可恢复错误，例如无效输入或在成功响应中检测到不支持的内容，会立即停止。
-5. 两组实例全部失败时返回 `provider_exhausted`。提取过程中产生的最佳短正文会保留在 `partial`。
-
-执行这些 Route 前，`extract --provider auto` 会在任一组启用了 HTTP Instance 时先探测一个源站 Markdown 变体：文件型路径追加 `.md`，目录路径使用 `index.md`，请求 `text/markdown`/`text/plain`，只接受足够长且非 HTML 的文本响应。未命中或请求失败时不产生额外 attempt，并继续原有 Route；命中时结果归属已启用的 HTTP Instance，且不改变 Provider 顺序。显式非 HTTP 选择不变；显式 HTTP 会先探测 Markdown，未命中后再请求原 URL。
-
-每次 `auto` 调用完成后，成功 Instance 移到所在组队头，未尝试 Instance 保持在中间，发生上述可回退失败的 Instance 稳定移到所在组队尾；顺序学习不会跨组移动 provider。所有 Instance 都失败时顺序不变。Search 与 Extract 独立学习；显式 Instance、不可回退错误和用户取消不会更新顺序。写入采用原子替换，并发进程由最后写入者生效。
-
-Attempt 会保留 Provider 的原始错误码、HTTP status 和 `retryable` 值。`retryable` 表示原始操作是否适合对同一 Provider 重试，不再是自动 Route 切换到下一 Provider 的唯一条件。
-
-显式指定 Instance 时严格执行，不触发 fallback。若实例不在 Route 中，返回 `provider_disabled`。
-
-默认上限：Search 总超时/单次超时为 120s/60s，Extract 为 120s/45s；单个响应硬上限为 5 MiB。`--timeout` 只覆盖本次命令的总超时。
-
-## 输出契约
-
-能力命令使用 output schema v2，默认 envelope 刻意保持精简：
-
-```json
-{
-  "schemaVersion": 2,
-  "ok": true,
-  "provider": "exa",
-  "data": {
-    "results": [
-      {
-        "rank": 1,
-        "title": "Example",
-        "url": "https://example.com/",
-        "snippet": "Example snippet"
-      }
-    ]
-  }
-}
-```
-
-使用 `--json` 时，能力命令成功只包含 `schemaVersion`、`ok`、最终 Instance ID 和规范化 `data`。失败时包含精简 `error`；实际尝试过 Provider 时，`attempts` 只保留 Instance ID、错误码和可选 HTTP status。提取质量失败可包含不含 raw 的 `partial` 文档。排序无法写回时，成功或失败 envelope 会额外包含 `warnings: [{ "code": "provider_order_update_failed", "message": "..." }]`，但不会覆盖主要结果。搜索和提取输入错误也使用相同的精简失败结构。
-
-面向人的输出中，提取以 YAML front matter 开头、随后是 Provider 规范化的 Markdown 正文；搜索使用编号 Markdown 列表；诊断和配置编辑使用标题加格式化 JSON 数据。元数据值统一使用 JSON 双引号标量编码，正文内容不改写。已有脚本和其他机器消费者应显式追加 `--json`。
-
-默认提取输出示例：
-
-```markdown
----
-provider: "local_http"
-url: "https://example.com/article"
-title: "Example title"
----
-
-# Article content
-```
-
-所有成功和失败 envelope 使用 schema version 2。稳定 schema 位于 [schemas](schemas)。
-
-退出码：
-
-- `0`：成功
-- `2`：输入、配置、未知或未启用 provider
-- `1`：运行时/provider/doctor/编辑器启动失败
-- `130`：用户取消
-
-`providers` 会列出每个 Instance 的 Type、能力、Route 启用状态、凭据来源和 base URL 来源；`searchRoute`/`searchFallbackRoute` 与 `extractRoute`/`extractFallbackRoute` 是下一次 `auto` 使用的两组有效顺序。`doctor` 只做本地配置检查，不主动调用远端 API；当已启用 Route 中存在未配置 Instance 时，命令返回 `doctor_failed` 和退出码 `1`。
-
-## DeepSeek 兼容 HTTP 网关
-
-仓库另外提供一个**独立**的 HTTP 服务，把同样的 provider、路由和传输实现包装成 DeepSeek 工具协议。它不是 CLI 的替代品：CLI 的命令、退出码、schema v2 envelope 和 npm bin 契约都不变。
+以 Docker 镜像方式运行：`ghcr.io/juexe/web-access-cli`，多架构 `linux/amd64` 与 `linux/arm64`，每次 GitHub Release 自动发布精确版本标签，正式版另加 `latest`。部署只需要 Docker，不需要 Node.js 或 pnpm：
 
 ```sh
-# 源码运行（默认监听 127.0.0.1:8080）
+docker pull ghcr.io/juexe/web-access-cli:0.7.0
+docker compose -f deploy/compose.yaml --env-file personal/deploy.env up -d --wait gateway
+```
+
+也可直接跑源码；默认监听 `127.0.0.1:8080`：
+
+```sh
+# 源码运行
 WEB_ACCESS_CONFIG=~/.config/web-access-cli/config.json \
 WEB_ACCESS_GATEWAY_API_KEY_FILE=/path/to/gateway-api-key \
-pnpm start:gateway     # 或 node --import tsx src/server.ts
-
-# 构建后运行
-node dist/server.js
+node --import tsx src/server.ts
 ```
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/v1/tools/search` | DeepSeek Search 兼容 |
-| `POST` | `/v1/tools/fetch` | DeepSeek Fetch 兼容 |
-| `GET` | `/`、`/panel` | 请求记录面板（HTML，页面本身不含数据） |
-| `GET` | `/admin/api/records` | 最近请求记录（需要 Bearer Key） |
-| `GET` | `/healthz` | 进程存活，无需鉴权 |
-| `GET` | `/readyz` | 配置/生命周期就绪，无需鉴权 |
+| `POST` | `/v1/tools/search` | 兼容 DeepSeek Search |
+| `POST` | `/v1/tools/fetch` | 兼容 DeepSeek Fetch |
+| `GET` | `/healthz`、`/readyz` | 存活与配置就绪，无需鉴权 |
+| `GET` | `/panel` | 管理后台页面骨架，无需鉴权也不含数据 |
+| `GET`/`DELETE` | `/admin/api/records` | 请求记录，需要 Bearer Key |
+| `GET` | `/admin/api/overview` | 运行统计、路由就绪情况与各实例计数 |
+| `PUT` | `/admin/api/config` | 修改路由、预算与实例；热生效并写回文件 |
+| `POST` | `/admin/api/config/reload` | 从磁盘重载配置文件 |
 
-网关只从文件读取独立的 Bearer Key（`WEB_ACCESS_GATEWAY_API_KEY_FILE`），使用 Node crypto 做定长摘要比较，并拒绝重复 `Authorization`。网关是私有单用户部署，**不设本地并发闸门、请求体大小上限或请求体读取超时**：并发只受上游 provider 与进程本身约束，入站请求体不再返回 413/408，也不会因并发满返回 429。成功与错误都使用 `Cache-Control: no-store`。
+- Bearer Key 只从文件读取，按定长摘要比较，并拒绝重复 `Authorization`。网关是私有单用户部署，不额外设本地并发闸门、请求体大小上限和读取超时，也不会自行产生 413/408。响应带 `Cache-Control: no-store`。
+- 搜索字段：`query`（1–128 字符）、`count`（1–50，默认 10）、`ori_question`（非空时 1–128 字符）、`localization`（非空时须为 IP）、`need_content`（布尔，默认 `false`）。Fetch 只接受一个不超过 8192 字符的绝对 HTTP(S) URL。未知字段被忽略，不能覆盖 Provider、凭据、超时或配置。
+- 响应只保证协议兼容，不等同官方引擎：`summary` 复用 `snippet`，`rerank_score` 恒为 `0`，`authority` 恒为 `-1`，`site_name`/`site_icon`/`date` 为 `null`。按分数或权威度过滤的客户端必须改策略，结果数量、排序和质量都不作承诺。
+- `ori_question` 与 `localization` 只做校验，核心无对应能力，不会传给 Provider。
+- `need_content=true` 按排名补抓：并发 2、总窗口 30 秒、单项 10 秒、单次尝试 3 秒；失败时保留结果、内容留空。补抓与响应都不设大小上限，且**补抓会消耗提取配额**。Fetch 与补抓派生自己的配置，正文阈值降为 1 字符以放行短页面；源站 Markdown 探测仍需 500 字符。客户端断开会取消在途工作。
+- 错误固定为 `{ "error": { "message", "type": "…", "param": null, "code" } }`：400 `invalid_request_error`、401 `invalid_api_key`、402 `insufficient_quota`、404 `no_usable_content` 或未知路径、405 方法不允许、503 正在停止、504 `upstream_timeout`，500 表示 Provider、凭据或配置失败。429 只表示上游限流。
+- 工具请求从不改写 Provider 顺序，也不触发配置写回。唯一写入方是后台「配置管理」工作区与 `/admin/api/config*`：热生效并原子写回，配置文件只读挂载时退化为仅内存生效。
+- 面板在内存中保留最近 500 条记录：状态、耗时、错误、Provider、query/URL、尝试链路、摘要与截断正文预览（搜索结果 2 000 字符、Fetch 4 000 字符），从不含完整正文、header 或凭据。`#apikey=<key>` 片段可直接登录，脚本读取后立即从地址栏移除并存入 `sessionStorage`。
 
-请求字段与官方一致：
+### 在 DSH 中直接使用
 
-| 字段 | 行为 |
-| --- | --- |
-| `query` | 必填，1–128 个 Unicode 字符，不能全为空白；原样保留搜索语法 |
-| `count` | 1–50 的整数，缺省 10 |
-| `ori_question` | 可省略或 `null`；非 null 时 1–128 个字符 |
-| `localization` | 可省略，默认空字符串；非空必须是 IP 地址 |
-| `need_content` | 可省略，默认 `false`；必须是布尔值 |
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）自带 `@deepseek-ai/dsh-web-deepseek-api`，说的正是这套 API，因此把 `web_search` 与 `web_fetch` 指过来不需要额外插件，只要一个 base URL。`~/.dsh/cordis.patch.yml`：
 
-Fetch 只接受非空、最长 8192 字符、含 hostname、无 userinfo 的绝对 HTTP(S) URL。未知请求字段会被忽略，且无法通过未知字段指定 provider、凭据、timeout 或配置。
+```yaml
+- id: web
+  name: "@deepseek-ai/dsh-web"
+  config:
+    searchProvider: deepseek-search-api
+    fetchProvider: deepseek-fetch-api
+- id: web-deepseek-api
+  name: "@deepseek-ai/dsh-web-deepseek-api"
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY       # 这里要放网关 Key，不是 DeepSeek Key
+    baseURL: http://127.0.0.1:8080/v1/tools
+```
 
-**响应是协议兼容而非与官方搜索引擎等价**：`summary` 直接复制 `snippet`，`rerank_score` 恒为 `0`，`authority` 恒为 `-1`，`site_name`/`site_icon`/`date` 恒为 `null`。占位评分**不是** DeepSeek 的质量评分；依赖 `rerank_score >= 1.5` 或 `authority >= 3` 筛选的客户端必须调整策略，否则会过滤掉全部结果。网关不承诺结果数量、排序或摘要质量与官方一致，也不跨 provider 凑数或重新分页。
+`baseURL` 写完整 API 基址，含路径前缀但不含 `/search` 或 `/fetch`；插件的 `apiKeyEnv` 默认取 `DEEPSEEK_API_KEY`，需让它指向存网关 Key 的变量。此后 `web_search` 与 `web_fetch` 走本网关，除上文提到的占位分数字段外无需其他改动。网关是私有部署，应放在可信网络内而不是直接暴露公网。
 
-`ori_question` 与 `localization` 本期接受并校验，但中立核心没有对应能力，因此不影响 provider 请求，也不会拼进 `query`。
+部署、密钥、升级与回滚见 [deploy/README.md](deploy/README.md)；架构决策见 [ADR 0019](docs/adr/0019-deepseek-tool-gateway.md)。
 
-`need_content=true` 时为每条结果补抓正文：按排名顺序、最多两路并发、总预算 30 秒、单篇 10 秒、每次 provider 尝试 3 秒。失败或超时的正文留空但结果保留；补抓正文与完整响应都**不设大小上限**，超长页面原样返回。**补抓会消耗 extract 上游额度。**
+## 配置
 
-网关为 Fetch 与补抓派生自己的配置，正文最短阈值降为 1 个字符，因此有效短页面会成功；源站 `.md` 猜测仍要求至少 500 字符（或原配置阈值取大者），避免短小的 `Not found` 页面误命中。搜索和 Fetch 各用现有配置的总超时，补抓有独立的 30 秒窗口；客户端断开会取消在途工作。
+严格 JSON，未知字段报错。解析顺序为 `--config`、`WEB_ACCESS_CONFIG`、`~/.config/web-access-cli/config.json`；默认路径缺失时使用内置默认值，显式路径缺失时返回 `config_error`，不扫描父目录。
 
-错误统一为 `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`：400 输入错误、401 `invalid_api_key`、402 额度不足、404 无可用正文或直连目标不可用、504 下游超时、500 凭据/配置/未知失败。429 只在**上游 provider 限流**时出现，网关自身不再因并发生成 429；请求体也不再触发 413/408。目标站点的 401/403 属于 Fetch 不可用；云 provider 的 401/403 返回 500。
+`config edit` 在文件缺失时创建完整默认配置并用 `VISUAL`（其次 `EDITOR`）打开，不经 shell 解释、不重排内容；`config init` 按标准凭据环境变量生成配置且不覆盖已有文件。环境变量优先于明文 key。完整 schema 见 [schemas/config.schema.json](schemas/config.schema.json)：
 
-网关不写回 provider 顺序，也不修改配置：服务运行期间使用启动时加载的配置快照。部署方式、Docker Compose 模板、secret 挂载、诊断、升级与回滚见 [deploy/README.md](deploy/README.md)；架构决策见 [docs/adr/0019-deepseek-tool-gateway.md](docs/adr/0019-deepseek-tool-gateway.md)。
+```json
+{
+  "$schema": "https://unpkg.com/web-access-cli@0.7.0/schemas/config.schema.json",
+  "providers": [
+    { "id": "exa_team", "type": "exa", "apiKeyEnv": "TEAM_EXA_API_KEY" },
+    { "id": "firecrawl_local", "type": "firecrawl", "baseUrl": "http://127.0.0.1:3002" }
+  ],
+  "search": { "providers": ["exa_team"], "providers_fallback": ["brave"] },
+  "extract": { "providers": ["firecrawl_local"], "providers_fallback": ["http"] }
+}
+```
 
-浏览器打开网关根路径或 `/panel`，输入网关 Key 即可查看最近 500 条工具请求（状态、耗时、错误码、provider、query/URL 与前 5 条结果标题）。记录只保存在内存中，重启清空，不记录响应正文、header 或凭据；未鉴权请求不进入记录。面板 HTML 本身不含数据，`/admin/api/records` 复用同一个 Bearer Key。也可用 `#apikey=<key>` 片段直接打开，脚本读取后立即从地址栏移除；不要用查询串传递 Key。
+内置实例：`tavily`、`exa`、`bocha`、`yuanbao`、`brave`、`searxng`、`anysearch`、`xcrawl`、`deepseek`、`firecrawl`、`jina`、`http`、`xai_x_search`、`xai_web_search`。复用内置 ID 表示覆盖该实例，新 ID 表示新增同类型实例；只有写入路由的实例才会启用。默认路由：
 
-## HTTP 与安全边界
+- Search：`tavily -> exa -> bocha -> yuanbao -> brave -> searxng -> anysearch -> xcrawl -> deepseek`，回退 `xai_x_search -> xai_web_search`
+- Extract：`firecrawl -> jina -> exa -> anysearch -> xcrawl -> deepseek`，回退 `http`
 
-- 默认遵循 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`。
-- 最多跟随 5 次重定向；跨 origin 重定向会移除鉴权、Cookie 和常见 token headers。
-- 所有响应都执行流式字节上限，避免先完整缓冲超大响应。
-- HTTP Extract 使用 LinkeDOM、Mozilla Readability、Turndown，并对 Next.js RSC payload 做后备解析。
-- HTTP Extract 在 route 已启用 HTTP Instance 时优先读取可用的源站 Markdown 变体（`.md` 或目录 `index.md`）。
-- PDF、图片、音频、视频、zip 和通用二进制内容会返回 `unsupported_content`。
-- 按项目设计，CLI 不阻止 localhost、私网地址或云元数据 URL。调用者必须在不可信输入场景中自行实施 URL allowlist、网络隔离或出站代理策略。
+Search 主路由显式置空非法；Extract 可用空主路由关闭。AnySearch 与 XCrawl 支持 `searchFilterMode`：`strict`（遇 freshness 跳过）或 `best_effort`（把 freshness 改写成查询片段）。元宝向 `/SearchPro` 发送 `Query`/`Site`/`Freshness`，响应体内的错误仍可回退。DeepSeek 走 `/v1/tools/search` 与 `/v1/tools/fetch`，把 freshness 和域名改写为 `after:`/`site:` 提示并在本地再次过滤。xAI 每次调用读取 `XAI_AUTH_JSON` 中的 OAuth JSON 且不刷新，作主 Provider 时需调高 `attemptTimeoutMs`。
 
-## 项目边界
+| 类型 | API key | Base URL |
+| --- | --- | --- |
+| Tavily / Exa / Brave / Firecrawl / XCrawl | `<NAME>_API_KEY` | `<NAME>_BASE_URL` |
+| Bocha | `BOCHA_API_KEY` | `BOCHA_BASE_URL`，默认 `https://api.bocha.cn` |
+| SearXNG | 无 | `SEARXNG_BASE_URL`，必填 |
+| Jina / AnySearch | `JINA_API_KEY` / `ANYSEARCH_API_KEY`，可选 | `<NAME>_BASE_URL` |
+| DeepSeek | `DEEPSEEK_API_KEY` | 固定 `https://api.deepseek.com` |
+| xAI Search | `XAI_AUTH_JSON`（OAuth 文件） | 默认 `https://cli-chat-proxy.grok.com/v1`，`grok-4.6` |
 
-本项目大量参考 `pi-web-access` 的 provider 和内容提取实现，但不包含 Pi-specific 注册、工具协议或 UI 代码。
+自定义实例用 `apiKeyEnv`/`baseUrlEnv` 指定变量名，可设置 `baseUrl` 与 `headers`。公共 Firecrawl Cloud 需要 key，自托管 Firecrawl v2 不需要。
 
-欢迎贡献。提交 Issue 或 Pull Request 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告。
+## 路由与限制
 
-许可证为 MIT，第三方与上游归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+两个入口共用同一 Router，差异只在输出形态、单次命令选项，以及网关固定的 Fetch/补抓阈值。
+
+`auto` 先走主路由，主组出现可回退失败后才进入回退路由。未完成配置的实例记录为失败并跳过；Provider 非 2xx 响应和可恢复错误（网络、超时、响应过大、无可用正文）继续下一个实例；无效输入和不支持内容立即停止；全部失败返回 `provider_exhausted`，最佳短正文保留在 `partial`。显式 `--provider` 只执行一次且不回退，不在路由中时返回 `provider_disabled`。`retryable` 描述同一 Provider 能否重试，不是切换条件。
+
+`extract --provider auto` 在启用 HTTP 时先探测一个 Markdown 变体：文件型路径用 `.md`，目录用 `index.md`，只接受足够长的非 HTML 文本。未命中透明回退，命中记在 HTTP 实例名下且不改变顺序。
+
+CLI 每次 `auto` 后，成功实例移到所在组队头，可回退失败的移到队尾，不跨组移动。Search 与 Extract 独立学习；显式实例、不可回退失败和取消都不改变顺序，写入原子且后者覆盖前者。网关从不改写路由。
+
+默认限制：Search 总 120 秒、单次 60 秒；Extract 总 120 秒、单次 45 秒；单响应 5 MiB。`--timeout` 只覆盖本次总超时。
+
+## 输出
+
+能力命令输出 schema version 2。`--json` 时包含 `schemaVersion`、`ok`、最终实例和 `data`；失败附加紧凑 `error`、`attempts`（实例、错误码、可选状态码），可能有 `partial`。顺序写回失败时追加 `warnings`，不替换结果。面向人的输出为 Markdown：`provider` front matter 加编号结果列表或提取正文；诊断命令输出标题加 JSON。脚本应显式传 `--json`。
+
+```json
+{ "schemaVersion": 2, "ok": true, "provider": "exa",
+  "data": { "results": [{ "rank": 1, "title": "Example", "url": "https://example.com/", "snippet": "..." }] } }
+```
+
+`providers` 报告每个实例的类型、能力、路由状态、凭据与 URL 来源，以及下次调用的有效顺序；启用路由中存在未配置实例时 `doctor` 返回 `1`。
+
+## 安全边界
+
+- 默认遵循 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`；最多跟随五次重定向，跨 origin 时移除鉴权、Cookie 和 token 类 header。
+- 响应按流限制 5 MiB，不先无界缓冲。HTTP 提取使用 LinkeDOM、Readability、Turndown，并带 RSC 后备；二进制与媒体返回 `unsupported_content`。
+- 按设计两个入口都不阻止 localhost、私网地址或云元数据 URL。不可信场景需自行加 allowlist、网络隔离或出站策略；网关定位为 Bearer Key 之后的私有单用户部署。
+
+## 范围
+
+Provider 与提取实现大量取自 `pi-web-access`，不含 Pi 专用注册、工具协议和 UI。参见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [SECURITY.md](SECURITY.md)，MIT 许可，第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

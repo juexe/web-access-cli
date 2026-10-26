@@ -5,334 +5,174 @@ English | [简体中文](README_CN.md)
 [![CI](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Juexe/web-access-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An agent-neutral CLI for web capabilities. It defines search and web content extraction as stable capabilities while normalizing differences among Tavily, Exa, Bocha, Yuanbao Search, Brave, SearXNG, AnySearch, XCrawl, DeepSeek, Firecrawl, Jina, and other providers behind a unified internal schema.
+Two entry points over one core: a **CLI** for direct invocation and a **DeepSeek-compatible HTTP gateway** for long-running agent runtimes. Both expose the same two capabilities — search and content extraction — and normalize Tavily, Exa, Bocha, Yuanbao Search, Brave, SearXNG, AnySearch, XCrawl, DeepSeek, Firecrawl, Jina, and others behind one schema.
 
-The CLI is the primary product interface. It is not tied to Pi, Claude Code, Codex, Cursor, OpenCode, or any other agent. Skills, MCP integrations, and agent plugins may only integrate as adapters on top of the CLI; they must not leak into the core capabilities or provider implementations.
+Neither entry point is tied to Pi, Claude Code, Codex, Cursor, OpenCode, or any other agent. Skills, MCP integrations, and agent plugins are adapters on top; they never enter the core. Requires Node.js 22.19+.
 
-## Capabilities and providers
+## Capabilities
 
 | Capability | Provider types | Normalized output |
 | --- | --- | --- |
 | `search` | Tavily, Exa, Bocha, Yuanbao Search, Brave, SearXNG, AnySearch, XCrawl, DeepSeek, xAI x_search, xAI web_search | `rank`, `title`, `url`, `snippet` |
 | `extract` | Firecrawl v2, Jina Reader, Exa Contents, AnySearch, XCrawl, DeepSeek Fetch, HTTP | Markdown `Document` |
 
-A provider type describes an implementation, while a provider instance is a configurable instance of that type. One type can have multiple instances, such as `exa_team` and `exa_personal`. Each capability has a primary `providers` route and a `providers_fallback` route. Both arrays determine enabled instances and their current `auto` order; the CLI only reorders members within their existing group.
+A provider type is an implementation; a provider instance is a configured instance of that type, so `exa_team` and `exa_personal` can coexist. Each capability has a primary `providers` route and a `providers_fallback` route; both define the enabled instances and their `auto` order.
 
-## Installation
-
-Node.js 22.19 or later is required.
-
-Install the CLI from npm:
+## Install
 
 ```sh
-npm install --global web-access-cli
+npm install --global web-access-cli    # or: pnpm add --global web-access-cli
 web-access --help
 ```
 
-Alternatively, install it with pnpm:
+From a checkout: `pnpm install --frozen-lockfile && pnpm check`. The gateway runs from the same checkout (`node --import tsx src/server.ts`) or built output (`pnpm start:gateway`); production deployment uses the GHCR image, whose Compose template and secret conventions are in [deploy/README.md](deploy/README.md).
+
+Layout: `src/cli.ts` and `src/server.ts` are the two entries, `src/gateway/` holds the tool protocol, and `src/core/`, `src/providers/`, `src/transport/` are shared by both. Adapters map protocols only; fallback, deadlines, envelopes, and exit codes live in `src/core`.
+
+## CLI
 
 ```sh
-pnpm add --global web-access-cli
-web-access --help
-```
-
-For development from source:
-
-```sh
-git clone https://github.com/juexe/web-access-cli.git
-cd web-access-cli
-pnpm install --frozen-lockfile
-pnpm check
-pnpm pack:check
-```
-
-## Project structure
-
-```text
-src/cli.ts                 Commander CLI and exit codes
-src/server.ts              Standalone DeepSeek-compatible gateway entry point
-src/config/                Configuration files, environment variables, and route merging
-src/core/                  Public types, schemas, errors, routing, and diagnostics
-src/gateway/               Gateway protocol schema, service mapping, and HTTP boundary
-src/providers/             Provider adapters, registry, and HTTP/RSC extraction
-src/transport/             Proxies, timeouts, redirects, and response size limits
-schemas/                   Generated JSON Schemas
-test/                      node:test unit tests and local HTTP integration tests
-deploy/                    Public gateway Compose template, env/config examples, operations guide
-```
-
-Provider adapters should handle protocol mapping only. Fallback, deadlines, attempts, envelopes, and exit codes are managed centrally by `src/core`. Do not add lifecycle or tool registration code for Pi, Claude Code, Codex, or any other agent to an adapter.
-
-## Development workflow
-
-```sh
-pnpm install
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm pack:check
-pnpm test:docker
-```
-
-`pnpm check` runs linting, type checking, tests, and the build in that order. After changing `src/core/schema.ts`, run `pnpm build` again and commit the updated `schemas/*.schema.json` files. Provider tests should use the mock transport or local HTTP server from `test/helpers.ts`; they must not depend on real API keys or external network reliability.
-
-## Commands
-
-```sh
-web-access search "Agent-neutral web CLI"
 web-access search "TypeScript release" --provider exa --limit 10 --freshness month
 web-access search "browser automation" --include-domain example.com --exclude-domain blocked.example.com
-
-web-access extract https://example.com/article
 web-access extract https://example.com/article --provider http --timeout 30000
 web-access extract https://example.com/article --json
 
-web-access providers
-web-access doctor
-
-web-access config edit
-web-access --config "/path/to/config.json" config edit
-web-access config init
-web-access --config "/path/to/config.json" config init --json
+web-access providers          # route, capability, credential and URL status
+web-access doctor             # local configuration checks, no network
+web-access config init        # scaffold from credential env vars
+web-access config edit        # open in $VISUAL/$EDITOR
 ```
 
-The CLI provides the `search` and `extract` capability commands, the `providers` and `doctor` diagnostic commands, and the `config init` and `config edit` configuration commands. The current version does not provide batch/all, answer, a dedicated PDF path, a Node.js SDK, or a generic MCP integration. The repository includes an optional [web-access-cli Agent Skill](skills/web-access-cli/SKILL.md) for source-checkout use; it is not included in the npm package.
+Global options: `--config <path>`, `--json`, `--help`, `--version`. Capability commands print human-readable Markdown, `config init` prints the created path, and every failure prints one JSON envelope. Exit codes: `0` success, `2` invalid input/config or a disabled provider, `1` runtime or doctor failure, `130` cancelled.
 
-### Global options
+Not provided: batch/all, answer, a PDF-only path, a Node SDK, or generic MCP. An optional [Agent Skill](skills/web-access-cli/SKILL.md) exists for source checkouts and is not published to npm.
 
-- `--config <path>`: Explicitly select a configuration file.
-- `--json`: Output a compact schema v2 JSON envelope. Without it, successful commands write human-readable Markdown; all failures always write JSON.
-- `--help`, `--version`: Print standard CLI help or version text.
+## HTTP gateway
 
-Successful commands default to Markdown for human readers. `search` writes a YAML front matter block followed by a numbered result list; `extract` writes YAML front matter followed by the normalized Markdown body; `providers`, `doctor`, and `config edit` write a heading followed by pretty-printed JSON data; `config init` writes the created absolute path on one line. Add `--json` when a schema v2 envelope is required. Extract `partial` results and all failures, including invalid input and runtime errors, always remain JSON envelopes. Diagnostic messages are never mixed into stdout.
+A long-running process that serves the same providers, routing and transport over DeepSeek's [Search and Fetch API](https://api-docs.deepseek.com/zh-cn/guides/search): same endpoints, auth header, request fields and error envelope, so a client written for the official service only changes its base URL. It changes nothing about the CLI contract.
 
-## Configuration
-
-Configuration files use strict JSON; unknown fields are rejected. The CLI reads only an explicit path or a user-level path and does not search parent project directories for configuration files.
-
-The default path on every platform is `~/.config/web-access-cli/config.json`, where `~` is the current user's home directory. The `WEB_ACCESS_CONFIG` environment variable can select another path. The `--config` command-line option takes precedence.
-
-`web-access config edit` creates parent directories and a complete default configuration when the file is missing, then opens it with the command in `VISUAL`, or `EDITOR` when `VISUAL` is empty. The value may contain a quoted executable path and arguments; it is parsed without shell evaluation and the configuration path is appended as a separate argument. An existing file is opened byte-for-byte as-is, even when it is temporarily invalid JSON; it is never overwritten or reformatted. The command waits only for the editor process to start, not for it to close. When neither variable is set, the command returns `open_failed`; a configuration file that was created successfully remains available for manual editing.
-
-`config init` creates a new configuration from standard credential environment variables and refuses to overwrite an existing file. It keeps all built-in instance definitions, writes detected Search providers to the primary route, leaves Search fallback empty, writes detected remote Extract providers to the primary route, and places `http` in the Extract fallback route. After an `auto` capability call succeeds or encounters fallback-eligible failures, the CLI atomically reorders the matching `providers` or `providers_fallback` array in place. Members never move between groups. The legacy `_providers` and `_providers_fallback` fields are rejected as unknown configuration fields.
-
-The complete JSON Schema is available at [schemas/config.schema.json](schemas/config.schema.json). Example:
-
-```json
-{
-  "$schema": "https://unpkg.com/web-access-cli@0.6.0/schemas/config.schema.json",
-  "providers": [
-    {
-      "id": "exa_team",
-      "type": "exa",
-      "apiKeyEnv": "TEAM_EXA_API_KEY",
-      "headers": {
-        "X-Team": "docs"
-      }
-    },
-    {
-      "id": "searx_local",
-      "type": "searxng",
-      "baseUrl": "http://127.0.0.1:8080"
-    },
-    {
-      "id": "firecrawl_local",
-      "type": "firecrawl",
-      "baseUrl": "http://127.0.0.1:3002"
-    }
-  ],
-  "search": {
-    "providers": ["searx_local", "exa_team", "brave"],
-    "providers_fallback": ["deepseek"],
-    "limit": 5,
-    "timeoutMs": 120000,
-    "attemptTimeoutMs": 60000,
-    "maxResponseBytes": 5242880
-  },
-  "extract": {
-    "providers": ["firecrawl_local", "jina", "exa_team"],
-    "providers_fallback": ["http"],
-    "timeoutMs": 120000,
-    "attemptTimeoutMs": 45000,
-    "maxResponseBytes": 5242880,
-    "minContentCharacters": 500
-  }
-}
-```
-
-The built-in instances are `tavily`, `exa`, `bocha`, `yuanbao`, `brave`, `searxng`, `firecrawl`, `jina`, `http`, `anysearch`, `xcrawl`, `deepseek`, `xai_x_search`, and `xai_web_search`. A configuration entry with the same ID overrides fields on the built-in instance. A custom ID creates another instance of the selected type. An instance is enabled when it appears in either corresponding route. Bocha defaults to `https://api.bocha.cn` and requires an API key; Yuanbao Search defaults to `https://api.wsa.cloud.tencent.com` and requires a service API key; AnySearch defaults to `https://api.anysearch.com` and supports anonymous calls; XCrawl defaults to `https://run.xcrawl.com` and requires an API key; DeepSeek defaults to `https://api.deepseek.com` and requires an API key.
-
-Default routes:
-
-- Search primary: `tavily -> exa -> bocha -> yuanbao -> brave -> searxng -> anysearch -> xcrawl -> deepseek`
-- Search fallback: `xai_x_search -> xai_web_search`
-- Extract primary: `firecrawl -> jina -> exa -> anysearch -> xcrawl -> deepseek`
-- Extract fallback: `http`
-
-The default routes split built-in providers into a primary group and a fallback group. Custom instance IDs are merged into the instance list but must still be added to a route explicitly. An omitted capability route uses the defaults above; an explicit Search primary empty array is invalid, while Extract may be explicitly disabled with an empty primary route. In `auto` mode, incompletely configured instances are skipped. AnySearch and XCrawl accept `searchFilterMode`: `strict` (default; freshness skips the provider) or `best_effort` (rewrites freshness into a query fragment). Domain constraints are rewritten into the query and strictly re-applied locally. XCrawl Extract always uses synchronous Scrape with Markdown output; Map, Crawl, and asynchronous jobs are outside the current CLI capabilities.
-
-Yuanbao Search calls Tencent Cloud `POST /SearchPro` with a bearer service API key and a lower-case request body (`Query`, plus optional `Site` and `Freshness`). One `site:` include becomes `Site=<domain>`; up to five excludes become `Site=exclude:<domain>|<domain>`; other combinations are filtered locally only. Each entry of `Pages` is a JSON string and is mapped to `title`/`url`/`snippet`, preferring the standard `passage` summary over the dynamic `content`. Errors returned inside a successful HTTP response, such as `UnauthorizedOperation` or `ResourceNotFound`, stay fallback-eligible so `auto` can continue to the next provider. Only Search is supported; `Cnt` is omitted while `--limit` stays at or below 10 so the lite edition keeps working, and is rounded up to the next multiple of 10 (maximum 50) above that.
-
-DeepSeek uses the official tool API: Search posts to `{baseUrl}/v1/tools/search` and Fetch posts to `{baseUrl}/v1/tools/fetch`, both with a Bearer `DEEPSEEK_API_KEY`. Search sends `count` and `need_content: false` and maps `title`/`url`/`snippet` from `results`, falling back to the longer `summary` only when `snippet` is empty; the remaining fields stay in `raw`. `freshness` has no request field, so it is rewritten into the documented `after:` search syntax, and domain constraints use `site:`/`-site:`. Both are hints only and are strictly re-applied locally; if the combined query would exceed the 128-character limit, the remote hints are dropped and the original query kept. Fetch returns `content` as the Markdown body and `title` as the title; HTTP 404 or an empty body becomes fallback-eligible `no_usable_content`. 401 is `auth_error`, 402 is `quota_exceeded`, 429 is `rate_limited`, and other statuses are `provider_error`; 400/401/402/403 are not retryable against the same provider.
-
-XAI hosted Search reads an external OAuth JSON file from `XAI_AUTH_JSON` on every call and uses only its `access_token`; an external CLIProxyAPI process owns refresh and write-back. Instance fields `authJson`/`authJsonEnv` and `model`/`modelEnv` override the path and model. `xai_web_search` accepts at most five allow or exclude domains (mutually exclusive); `xai_x_search` maps `freshness` to the hosted `x_search` tool's `from_date` bound. Model-backed search can take longer than ordinary API searches; Search defaults allow up to 60 seconds per attempt and 120 seconds total, and `xai_x_search`/`xai_web_search` can exceed 60 seconds, so raise `attemptTimeoutMs` when using them as a primary provider.
-
-### Credentials and URLs
-
-Environment variables take precedence over plaintext keys in JSON. Built-in instances support these standard variables:
-
-| Type | API key | Base URL |
-| --- | --- | --- |
-| Tavily | `TAVILY_API_KEY` | `TAVILY_BASE_URL` |
-| Exa | `EXA_API_KEY` | `EXA_BASE_URL` |
-| Bocha | `BOCHA_API_KEY` | `BOCHA_BASE_URL`, default `https://api.bocha.cn` |
-| Brave | `BRAVE_API_KEY` | `BRAVE_BASE_URL` |
-| SearXNG | None | `SEARXNG_BASE_URL`, required |
-| Firecrawl | `FIRECRAWL_API_KEY` | `FIRECRAWL_BASE_URL` |
-| Jina | `JINA_API_KEY`, optional | `JINA_BASE_URL` |
-| HTTP | None | None |
-| AnySearch | `ANYSEARCH_API_KEY`, optional | `ANYSEARCH_BASE_URL`, default `https://api.anysearch.com` |
-| XCrawl | `XCRAWL_API_KEY` | `XCRAWL_BASE_URL`, default `https://run.xcrawl.com` |
-| DeepSeek | `DEEPSEEK_API_KEY` | No standard environment variable; default `https://api.deepseek.com` |
-| xAI Search | `XAI_AUTH_JSON` | No standard API-key variable; default `https://cli-chat-proxy.grok.com/v1`, model `grok-4.6` |
-
-Custom instances use `apiKeyEnv` and `baseUrlEnv` to name their environment variables. Every remote provider can define a `baseUrl` and additional `headers`. The public `api.firecrawl.dev` service requires a key; a self-hosted Firecrawl v2 instance can run without one.
-
-## Execution and fallback
-
-`--provider auto` follows the configured `providers` order first and enters `providers_fallback` only after the complete primary group fails with a fallback-eligible result:
-
-1. An instance with incomplete configuration is recorded as a failed attempt and skipped.
-2. A final provider HTTP response outside 2xx, including authentication, request, rate-limit, and server errors, causes the router to try the next instance.
-3. Other recoverable errors, including network errors, timeouts, oversized responses, and missing usable content, also cause the router to continue.
-4. Non-recoverable failures without a final non-2xx response, including invalid input and unsupported content detected in a successful response, stop execution immediately.
-5. If every instance in both groups fails, the command returns `provider_exhausted`. The best short content produced during extraction is preserved in `partial`.
-
-Before those routes run, `extract --provider auto` checks one Markdown variant when an HTTP instance is enabled in either group. It appends `.md` to file-like paths or uses `index.md` for directory paths, requests `text/markdown` and `text/plain`, and accepts only a sufficiently long non-HTML text response. A miss or request failure is transparent and falls through to the configured routes. A hit is reported as the enabled HTTP instance; it does not change provider order. Explicit non-HTTP selections are unchanged, while an explicit HTTP selection checks the Markdown variant before fetching the original URL.
-
-After each `auto` call, a successful instance moves to the front of its group, untried instances remain in the middle, and instances with the fallback-eligible failures above move stably to the back. Relative order within each group is preserved; no provider crosses between primary and fallback. The order stays unchanged when every instance in a group fails. Search and Extract learn independently; explicit instances, non-fallback failures, and user cancellation never update the order. Writes use atomic replacement, and the last writer wins across concurrent processes.
-
-An attempt keeps the provider's original error code, HTTP status, and `retryable` value. `retryable` describes whether the original operation can be retried against the same provider; it is not the sole condition for switching to the next provider in an automatic route.
-
-Selecting an instance explicitly executes it strictly without fallback. If the instance is not in the route, the command returns `provider_disabled`.
-
-Default limits are a 120-second total timeout and a 60-second per-attempt timeout for Search, and 120 seconds and 45 seconds respectively for Extract. Each response has a hard limit of 5 MiB. `--timeout` overrides only the total timeout for the current command.
-
-## Output contract
-
-Capability commands use output schema version 2. Their default envelope is intentionally small:
-
-```json
-{
-  "schemaVersion": 2,
-  "ok": true,
-  "provider": "exa",
-  "data": {
-    "results": [
-      {
-        "rank": 1,
-        "title": "Example",
-        "url": "https://example.com/",
-        "snippet": "Example snippet"
-      }
-    ]
-  }
-}
-```
-
-With `--json`, capability output contains only `schemaVersion`, `ok`, the final Instance ID and normalized `data`. Failures contain a compact `error` and, when providers were attempted, `attempts` entries with only Instance ID, error code and optional HTTP status. Extract quality failures may include a `partial` document without raw provider data. If the learned order cannot be written, either a success or failure envelope additionally contains `warnings: [{ "code": "provider_order_update_failed", "message": "..." }]` without replacing the primary result. Search and extract input errors use the same compact failure shape.
-
-For human-readable output, extraction starts with YAML front matter and then the provider-normalized Markdown body. Search results use a numbered Markdown list; diagnostics and config edit use a heading plus pretty-printed JSON data. Metadata values use JSON double-quoted scalar encoding and the body is not modified. Existing scripts and other machine consumers should append `--json` explicitly.
-
-Example default extract output:
-
-```markdown
----
-provider: "local_http"
-url: "https://example.com/article"
-title: "Example title"
----
-
-# Article content
-```
-
-All success and failure envelopes use schema version 2. Stable schemas are available in [schemas](schemas).
-
-Exit codes:
-
-- `0`: Success
-- `2`: Invalid input or configuration, or an unknown or disabled provider
-- `1`: Runtime, provider, doctor, or editor launch failure
-- `130`: User cancellation
-
-`providers` lists each instance's type, capabilities, route status, credential source, and base URL source. Its `searchRoute`/`searchFallbackRoute` and `extractRoute`/`extractFallbackRoute` fields show the two effective orders for the next `auto` call. `doctor` performs local configuration checks only and does not call remote APIs. If an enabled route contains an unconfigured instance, the command returns `doctor_failed` with exit code `1`.
-
-## DeepSeek-compatible HTTP gateway
-
-The repository also ships a **separate** HTTP service that wraps the same provider, route and transport implementations in the DeepSeek tool protocol. It is not a replacement for the CLI: commands, exit codes, the schema v2 envelope and the npm bin contract are unchanged.
+Run it as a Docker image — `ghcr.io/juexe/web-access-cli`, multi-arch `linux/amd64` and `linux/arm64`, published on every GitHub Release with exact version tags plus `latest` for stable releases. Deployment needs Docker only, no Node.js or pnpm:
 
 ```sh
-# From source (listens on 127.0.0.1:8080 by default)
+docker pull ghcr.io/juexe/web-access-cli:0.7.0
+docker compose -f deploy/compose.yaml --env-file personal/deploy.env up -d --wait gateway
+```
+
+Or from source; it listens on `127.0.0.1:8080` by default:
+
+```sh
+# Source
 WEB_ACCESS_CONFIG=~/.config/web-access-cli/config.json \
 WEB_ACCESS_GATEWAY_API_KEY_FILE=/path/to/gateway-api-key \
-pnpm start:gateway     # or node --import tsx src/server.ts
-
-# Built output
-node dist/server.js
+node --import tsx src/server.ts
 ```
 
 | Method | Path | Notes |
 | --- | --- | --- |
 | `POST` | `/v1/tools/search` | DeepSeek Search compatible |
 | `POST` | `/v1/tools/fetch` | DeepSeek Fetch compatible |
-| `GET` | `/`, `/panel` | Request records panel (HTML, no data in the page itself) |
-| `GET` | `/admin/api/records` | Recent request records (requires the Bearer key) |
-| `GET` | `/healthz` | Process liveness, no authentication |
-| `GET` | `/readyz` | Configuration/lifecycle readiness, no authentication |
+| `GET` | `/healthz`, `/readyz` | Liveness and configuration readiness, no auth |
+| `GET` | `/panel` | Admin UI shell, no auth and no data |
+| `GET`/`DELETE` | `/admin/api/records` | Request records, Bearer key required |
+| `GET` | `/admin/api/overview` | Runtime stats, route readiness, per-instance counters |
+| `PUT` | `/admin/api/config` | Patch routes, budgets, instances; hot-applies and persists |
+| `POST` | `/admin/api/config/reload` | Reload the config file from disk |
 
-The gateway reads its own Bearer key from a file only (`WEB_ACCESS_GATEWAY_API_KEY_FILE`), compares fixed-length digests with Node crypto, and rejects duplicate `Authorization` headers. It is a private single-user deployment, so it applies **no local admission, body size or body read deadline**: concurrency is bounded only by the upstream providers and the process itself, and request bodies never return 413/408 or a gateway-generated 429. Success and error responses use `Cache-Control: no-store`.
+- The Bearer key is read from a file only, compared as a fixed-length digest, and duplicate `Authorization` headers are rejected. Requests are single-user private, so the gateway adds no local admission, body size limit, or body read deadline and never returns 413 or 408 itself. Responses use `Cache-Control: no-store`.
+- Search fields: `query` (1–128 characters), `count` (1–50, default 10), `ori_question` (1–128 when set), `localization` (an IP address when non-empty), `need_content` (boolean, default `false`). Fetch takes one absolute HTTP(S) URL of at most 8192 characters. Unknown fields are ignored and cannot override provider, credentials, timeout, or configuration.
+- Responses are protocol-compatible, not equal to the official engine: `summary` reuses `snippet`, `rerank_score` is always `0`, `authority` is always `-1`, and `site_name`/`site_icon`/`date` are `null`. Clients filtering on score or authority must change strategy, and no result count, ranking, or quality is promised.
+- `ori_question` and `localization` are validated but have no core equivalent, so they never reach providers.
+- `need_content=true` backfills by rank with two concurrent tasks, a 30-second window, 10 seconds per item, and a 3-second attempt cap; failures keep the result with empty content. Backfill and responses have no size cap, and **backfill spends extract quota**. Fetch and backfill derive their own config with a 1-character minimum so short pages succeed, while the source Markdown probe still requires 500 characters. Client disconnects cancel in-flight work.
+- Errors are always `{ "error": { "message", "type": "…", "param": null, "code" } }`: 400 `invalid_request_error`, 401 `invalid_api_key`, 402 `insufficient_quota`, 404 `no_usable_content` or an unknown route, 405 wrong method, 503 while shutting down, 504 `upstream_timeout`, and 500 for provider, credential, or configuration failures. 429 only ever means the upstream provider rate-limited.
+- Tool requests never rewrite provider order: concurrent traffic does not trigger config write-back. The panel's config workspace and `/admin/api/config*` are the only writers, and they hot-apply plus persist atomically (with a read-only fallback when the file is mounted as a secret).
+- The panel keeps the last 500 requests in memory: status, duration, error, provider, query/URL, attempt chain, snippets, and truncated content previews (2 000 chars for search results, 4 000 for Fetch) — never full bodies, headers, or credentials. A `#apikey=<key>` fragment logs in, is stripped from the address bar, and stores the key in `sessionStorage`.
 
-Request fields match the official contract:
+### Use it from DSH
 
-| Field | Behavior |
-| --- | --- |
-| `query` | Required, 1–128 Unicode characters, not entirely whitespace; search operators are preserved |
-| `count` | Integer 1–50, default 10 |
-| `ori_question` | Optional or `null`; when non-null, 1–128 characters |
-| `localization` | Optional, default empty string; when non-empty it must be an IP address |
-| `need_content` | Optional, default `false`; must be a boolean |
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) ships `@deepseek-ai/dsh-web-deepseek-api`, a provider that speaks exactly this API, so pointing `web_search` and `web_fetch` here needs no extra plugin — only a base URL. In `~/.dsh/cordis.patch.yml`:
 
-Fetch accepts only a non-empty absolute HTTP(S) URL of at most 8192 characters with a hostname and no userinfo. Unknown request fields are ignored and cannot select a provider, credential, timeout or configuration override.
+```yaml
+- id: web
+  name: "@deepseek-ai/dsh-web"
+  config:
+    searchProvider: deepseek-search-api
+    fetchProvider: deepseek-fetch-api
+- id: web-deepseek-api
+  name: "@deepseek-ai/dsh-web-deepseek-api"
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY       # must hold the gateway key, not a DeepSeek key
+    baseURL: http://127.0.0.1:8080/v1/tools
+```
 
-**Responses are protocol-compatible, not equivalent to the official search engine**: `summary` reuses `snippet`, `rerank_score` is always `0`, `authority` is always `-1`, and `site_name`/`site_icon`/`date` are always `null`. The placeholder score is **not** a DeepSeek quality score; clients filtering on `rerank_score >= 1.5` or `authority >= 3` must change strategy or they will drop every result. Result count, ranking and summary quality are not promised, and the gateway never paginates or merges providers to fill `count`.
+`baseURL` is the full base including the path prefix and excluding `/search` or `/fetch`; the default `apiKeyEnv` is `DEEPSEEK_API_KEY`, so point it at a variable holding the gateway key. `web_search` and `web_fetch` then hit this gateway with no other change — only the placeholder score/authority fields differ, as noted above. Because the gateway is private, keep it on a trusted network rather than exposing it publicly.
 
-`ori_question` and `localization` are validated and accepted, but the neutral core has no equivalent capability, so they do not affect provider requests and are not folded into `query`.
+Deployment, secrets, upgrades and rollback: [deploy/README.md](deploy/README.md). Decision record: [ADR 0019](docs/adr/0019-deepseek-tool-gateway.md).
 
-With `need_content=true`, content is backfilled in rank order with at most two concurrent tasks, a 30-second total window, 10 seconds per item, and a 3-second per-provider attempt cap. Failed or timed-out content stays empty while the result is kept; backfilled content and complete responses have **no size cap**, so long pages are returned as-is. **Backfill spends extract provider quota.**
+## Configuration
 
-The gateway derives its own config for Fetch and backfill with a 1-character minimum, so valid short pages succeed, while the source Markdown probe still requires at least 500 characters (or the original threshold, whichever is larger) so a short `Not found` page cannot win. Search and Fetch each use the configured total timeout; backfill has an independent 30-second window, and client disconnects cancel in-flight work.
+Strict JSON; unknown fields are rejected. Resolution order is `--config`, then `WEB_ACCESS_CONFIG`, then `~/.config/web-access-cli/config.json`. A missing default file falls back to built-in defaults; a missing explicit file is a `config_error`. No parent directories are scanned.
 
-Errors are always `{ "error": { "message": "...", "type": "...", "param": null, "code": "..." } }`: 400 invalid input, 401 `invalid_api_key`, 402 insufficient quota, 404 no usable content or an unavailable direct target, 504 upstream timeout, and 500 for credential/configuration failures or unknown failures. A 429 now only means the **upstream provider** rate-limited the request; the gateway no longer generates 429 for its own concurrency, and request bodies no longer produce 413/408. Target-site 401/403 means Fetch is unavailable; cloud-provider 401/403 returns 500.
+`config edit` creates a full default file when absent and opens it with `VISUAL`, else `EDITOR`, without shell evaluation or reformatting; `config init` scaffolds from standard credential environment variables and refuses to overwrite. Environment variables override plaintext keys. The full schema is [schemas/config.schema.json](schemas/config.schema.json):
 
-The gateway never writes provider order and never modifies configuration: it uses the snapshot loaded at startup. Deployment, Docker Compose templates, secret mounts, diagnostics, upgrades and rollback are documented in [deploy/README.md](deploy/README.md); the architectural decision is in [docs/adr/0019-deepseek-tool-gateway.md](docs/adr/0019-deepseek-tool-gateway.md).
+```json
+{
+  "$schema": "https://unpkg.com/web-access-cli@0.7.0/schemas/config.schema.json",
+  "providers": [
+    { "id": "exa_team", "type": "exa", "apiKeyEnv": "TEAM_EXA_API_KEY" },
+    { "id": "firecrawl_local", "type": "firecrawl", "baseUrl": "http://127.0.0.1:3002" }
+  ],
+  "search": { "providers": ["exa_team"], "providers_fallback": ["brave"] },
+  "extract": { "providers": ["firecrawl_local"], "providers_fallback": ["http"] }
+}
+```
 
-Open the gateway root or `/panel` in a browser and enter the gateway key to inspect the last 500 tool requests (status, duration, error code, provider, query/URL and the first five result titles). Records are in memory only, are cleared on restart, and never contain response bodies, headers or credentials; unauthenticated requests are excluded. The panel HTML carries no data, and `/admin/api/records` uses the same Bearer key as the tool endpoints. A bookmark with an `#apikey=<key>` fragment logs in directly; the script strips it from the address bar immediately. Do not pass the key in a query string.
+Built-in instances: `tavily`, `exa`, `bocha`, `yuanbao`, `brave`, `searxng`, `anysearch`, `xcrawl`, `deepseek`, `firecrawl`, `jina`, `http`, `xai_x_search`, `xai_web_search`. Reusing a built-in ID overrides that instance; a new ID adds another of the same type. An instance is enabled only when listed in a route. Default routes:
 
-## HTTP and security boundaries
+- Search: `tavily -> exa -> bocha -> yuanbao -> brave -> searxng -> anysearch -> xcrawl -> deepseek`, fallback `xai_x_search -> xai_web_search`
+- Extract: `firecrawl -> jina -> exa -> anysearch -> xcrawl -> deepseek`, fallback `http`
 
-- Honors `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` by default.
-- Follows up to five redirects. Cross-origin redirects remove authentication, Cookie, and common token headers.
-- Enforces a streaming byte limit on every response instead of buffering an unbounded response first.
-- HTTP Extract uses LinkeDOM, Mozilla Readability, and Turndown, with fallback parsing for Next.js RSC payloads.
-- HTTP Extract prefers an enabled source Markdown variant (`.md` or directory `index.md`) before provider routes when that variant returns usable Markdown.
-- Returns `unsupported_content` for PDF, image, audio, video, zip, and general binary content.
-- By design, the CLI does not block localhost, private network addresses, or cloud metadata URLs. For untrusted input, callers must enforce their own URL allowlist, network isolation, or outbound proxy policy.
+An explicit empty Search primary route is invalid; Extract can be disabled with an empty primary route. AnySearch and XCrawl take `searchFilterMode`: `strict` (skip on freshness) or `best_effort` (rewrite freshness into the query). Yuanbao posts `Query`/`Site`/`Freshness` to `/SearchPro` and keeps in-body errors fallback-eligible. DeepSeek uses `/v1/tools/search` and `/v1/tools/fetch`, rewriting freshness and domains into `after:`/`site:` hints that are re-applied locally. xAI reads an OAuth JSON from `XAI_AUTH_JSON` without refreshing it and needs a raised `attemptTimeoutMs`.
 
-## Project scope
+| Type | API key | Base URL |
+| --- | --- | --- |
+| Tavily / Exa / Brave / Firecrawl / XCrawl | `<NAME>_API_KEY` | `<NAME>_BASE_URL` |
+| Bocha | `BOCHA_API_KEY` | `BOCHA_BASE_URL`, default `https://api.bocha.cn` |
+| SearXNG | None | `SEARXNG_BASE_URL`, required |
+| Jina / AnySearch | `JINA_API_KEY` / `ANYSEARCH_API_KEY`, optional | `<NAME>_BASE_URL` |
+| DeepSeek | `DEEPSEEK_API_KEY` | fixed `https://api.deepseek.com` |
+| xAI Search | `XAI_AUTH_JSON` (OAuth file) | default `https://cli-chat-proxy.grok.com/v1`, `grok-4.6` |
 
-This project draws heavily from the provider and content extraction implementations in `pi-web-access`, but does not include Pi-specific registration, tool protocols, or UI code.
+Custom instances name their variables with `apiKeyEnv`/`baseUrlEnv` and may set `baseUrl` and `headers`. Public Firecrawl Cloud needs a key; self-hosted Firecrawl v2 does not.
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request. Report security vulnerabilities privately according to [SECURITY.md](SECURITY.md).
+## Routing and limits
 
-Licensed under MIT. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party and upstream attribution.
+Both entry points call the same router and differ only in output shape, per-command options, and the gateway's fixed Fetch/backfill thresholds.
+
+`auto` walks the primary route, then the fallback route once the primary group has failed in a way that is fallback-eligible. Incomplete instances are recorded and skipped; non-2xx provider responses and recoverable errors (network, timeout, oversized, no usable content) continue to the next instance; invalid input and unsupported content stop immediately; full exhaustion returns `provider_exhausted` with the best short body in `partial`. An explicit `--provider` runs once with no fallback and returns `provider_disabled` if not routed. `retryable` describes retrying the same provider, not the switch condition.
+
+`extract --provider auto` first probes one Markdown variant when HTTP is enabled — `.md` for file-like paths, `index.md` for directories — accepting only sufficiently long non-HTML text. Misses fall through transparently; hits are attributed to the HTTP instance without reordering.
+
+In the CLI, after each `auto` call the successful instance moves to the front of its group and fallback-eligible failures move to the back; nothing crosses groups. Search and Extract learn independently. Explicit instances, non-fallback failures, and cancellations never reorder, and writes are atomic with last-writer-wins. The gateway never rewrites routes.
+
+Defaults: 120 s total and 60 s per attempt for Search; 120 s and 45 s for Extract; 5 MiB per response. `--timeout` overrides only the total timeout.
+
+## Output
+
+Capability commands emit schema version 2. With `--json`, output contains `schemaVersion`, `ok`, the final instance and `data`; failures add a compact `error`, `attempts` (instance, code, optional status), and possibly a `partial` document. A failed order write adds `warnings` without replacing the result. Human-readable output is Markdown: a `provider` front matter block plus either a numbered result list or the extracted document; diagnostics print a heading plus JSON. Scripts should pass `--json`.
+
+```json
+{ "schemaVersion": 2, "ok": true, "provider": "exa",
+  "data": { "results": [{ "rank": 1, "title": "Example", "url": "https://example.com/", "snippet": "..." }] } }
+```
+
+`providers` reports each instance's type, capabilities, route status, and credential/URL sources together with the effective orders for the next call; `doctor` fails with `1` when an enabled route contains an unconfigured instance.
+
+## Security boundaries
+
+- Honors `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY`; follows up to five redirects and strips authentication, Cookie, and token headers across origins.
+- Enforces a streaming 5 MiB limit rather than buffering first. HTTP extraction uses LinkeDOM, Readability, and Turndown with an RSC fallback; binaries and media return `unsupported_content`.
+- Neither entry point blocks localhost, private addresses, or cloud metadata URLs by design. Untrusted callers must add their own allowlist, isolation, or egress policy; the gateway targets a private single-user deployment behind its Bearer key.
+
+## Scope
+
+Provider and extraction implementations draw heavily on `pi-web-access`; Pi-specific registration, tool protocols, and UI are excluded. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md). Licensed under MIT with attribution in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
