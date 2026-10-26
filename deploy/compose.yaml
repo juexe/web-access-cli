@@ -26,8 +26,11 @@ services:
       WEB_ACCESS_GATEWAY_API_KEY_FILE: /run/secrets/gateway-api-key
       WEB_ACCESS_GATEWAY_HOST: 0.0.0.0
       WEB_ACCESS_GATEWAY_PORT: "8080"
+    volumes:
+      - type: bind
+        source: ${WEB_ACCESS_SECRET_PROVIDER_CONFIG:-../personal/secrets/provider-config.json}
+        target: /run/secrets/provider-config.json
     secrets:
-      - provider-config.json
       - gateway-api-key
     healthcheck:
       test:
@@ -48,7 +51,5 @@ services:
         max-file: "3"
 
 secrets:
-  provider-config.json:
-    file: ${WEB_ACCESS_SECRET_PROVIDER_CONFIG:-../personal/secrets/provider-config.json}
   gateway-api-key:
     file: ${WEB_ACCESS_SECRET_GATEWAY_KEY:-../personal/secrets/gateway-api-key}

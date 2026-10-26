@@ -8,10 +8,16 @@ import type {
 	CapabilityAttemptSummary,
 	ErrorCode,
 	OutputEnvelope,
+	ProviderAttempt,
 	SearchHit,
 } from "../core/types.ts";
 import { getAdapter } from "../providers/registry.ts";
 import type { HttpTransport } from "../transport/http.ts";
+import type {
+	GatewayAttemptRecord,
+	GatewayBackfillItemRecord,
+	GatewayContentBackfillSummary,
+} from "./records.ts";
 import type {
 	GatewayFetchRequest,
 	GatewayFetchResponse,
@@ -54,9 +60,15 @@ export interface GatewayReadiness {
 	reason?: string;
 }
 
+export interface GatewayOperationTrace {
+	provider?: string;
+	attempts: GatewayAttemptRecord[];
+	contentBackfill?: GatewayContentBackfillSummary;
+}
+
 /** Optional success metadata for the request panel; never part of the protocol. */
 export interface GatewayServiceObserver {
-	onSuccess?(info: { provider: string }): void;
+	onSuccess?(info: { provider: string; trace: GatewayOperationTrace }): void;
 }
 
 export interface GatewayService {
@@ -71,6 +83,8 @@ export interface GatewayService {
 		observer?: GatewayServiceObserver,
 	): Promise<GatewayFetchResponse>;
 	readiness(): GatewayReadiness;
+	getLoaded(): LoadedConfig;
+	setLoaded(next: LoadedConfig): GatewayReadiness;
 }
 
 /** An error that maps onto the official `{error:{message,type,param,code}}`. */
@@ -81,6 +95,8 @@ export class GatewayHttpError extends Error {
 	readonly retryAfterSeconds?: number;
 	/** Last provider that actually failed, filled by `classifyFailure` for the panel. */
 	provider?: string;
+	/** Detailed provider attempts captured before the failure. */
+	trace?: GatewayOperationTrace;
 
 	constructor(options: {
 		status: number;
@@ -197,7 +213,7 @@ function preflightOverride(
 	};
 }
 
-function checkReadiness(loaded: LoadedConfig): GatewayReadiness {
+export function checkGatewayReadiness(loaded: LoadedConfig): GatewayReadiness {
 	const byId = new Map(
 		loaded.instances.map((instance) => [instance.id, instance]),
 	);
@@ -222,6 +238,82 @@ function checkReadiness(loaded: LoadedConfig): GatewayReadiness {
 			return { ready: false, reason: `${capability}_route_unconfigured` };
 	}
 	return { ready: true };
+}
+
+function redactSecrets(text: string, loaded: LoadedConfig): string {
+	let output = text;
+	for (const instance of loaded.instances) {
+		const secret = instance.apiKey?.trim();
+		if (secret) {
+			output = output.split(secret).join("[REDACTED]");
+		}
+	}
+	return output;
+}
+
+function extractAttempts(
+	loaded: LoadedConfig,
+	envelope: OutputEnvelope,
+): GatewayAttemptRecord[] {
+	const debugAttempts = (
+		envelope as { debug?: { attempts?: ProviderAttempt[] } }
+	).debug?.attempts;
+	if (Array.isArray(debugAttempts) && debugAttempts.length > 0) {
+		return debugAttempts.map((item) => {
+			const record: GatewayAttemptRecord = {
+				provider: item.provider.id,
+				providerType: item.provider.type,
+				status: item.status === "success" ? "ok" : "failed",
+				durationMs: Math.max(0, Math.round(item.durationMs)),
+			};
+			if (item.error?.code) record.errorCode = item.error.code;
+			if (item.error?.message) {
+				record.errorMessage = redactSecrets(item.error.message, loaded);
+			}
+			if (item.error?.httpStatus !== undefined) {
+				record.httpStatus = item.error.httpStatus;
+			}
+			return record;
+		});
+	}
+	if (
+		!envelope.ok &&
+		"attempts" in envelope &&
+		Array.isArray(envelope.attempts)
+	) {
+		const byId = new Map(
+			loaded.instances.map((instance) => [instance.id, instance]),
+		);
+		return envelope.attempts.map((item) => {
+			const instance = byId.get(item.provider);
+			const skipped = item.code === "provider_unavailable";
+			const record: GatewayAttemptRecord = {
+				provider: item.provider,
+				...(instance ? { providerType: instance.type } : {}),
+				status: skipped ? "skipped" : "failed",
+				durationMs: 0,
+				errorCode: item.code,
+			};
+			if (item.httpStatus !== undefined) {
+				record.httpStatus = item.httpStatus;
+			}
+			return record;
+		});
+	}
+	if (envelope.ok && "provider" in envelope) {
+		const instance = loaded.instances.find(
+			(candidate) => candidate.id === envelope.provider,
+		);
+		return [
+			{
+				provider: envelope.provider,
+				...(instance ? { providerType: instance.type } : {}),
+				status: "ok",
+				durationMs: 0,
+			},
+		];
+	}
+	return [];
 }
 
 interface ClassifiedFailure {
@@ -346,34 +438,53 @@ function mapHit(hit: SearchHit): GatewaySearchResult {
 export function createGatewayService(
 	options: GatewayServiceOptions,
 ): GatewayService {
-	const loaded = options.loaded;
 	const transport = options.transport;
 	const now = options.now ?? (() => performance.now());
 	const limits: GatewayLimits = {
 		...GATEWAY_DEFAULT_LIMITS,
 		...(options.limits ?? {}),
 	};
-	const extractLoaded = deriveExtractConfig(loaded, limits);
-	const preflight = preflightOverride(loaded, limits);
-	const readiness = checkReadiness(loaded);
+	let currentLoaded = options.loaded;
+	let currentExtractLoaded = deriveExtractConfig(currentLoaded, limits);
+	let currentPreflight = preflightOverride(currentLoaded, limits);
+	let currentReadiness = checkGatewayReadiness(currentLoaded);
 
 	function fail(
+		loaded: LoadedConfig,
 		envelope: OutputEnvelope,
 		capability: "search" | "extract",
 	): never {
 		const failure = failureOf(envelope);
 		const error = classifyFailure(loaded, failure, capability);
-		error.provider = lastAttemptProvider(failure);
+		const provider = lastAttemptProvider(failure);
+		error.provider = provider;
+		error.trace = {
+			...(provider ? { provider } : {}),
+			attempts: extractAttempts(loaded, envelope),
+		};
 		throw error;
 	}
 
 	async function readContent(
+		loaded: LoadedConfig,
+		extractLoaded: LoadedConfig,
+		preflight: ExtractPreflightOverride,
 		hits: SearchHit[],
 		clientSignal: AbortSignal,
 		deadline: number,
 		signal: AbortSignal,
-	): Promise<string[]> {
+	): Promise<{
+		contents: string[];
+		summary: GatewayContentBackfillSummary;
+	}> {
+		const backfillStartedAt = now();
 		const contents = new Array<string>(hits.length).fill("");
+		const items: GatewayBackfillItemRecord[] = hits.map((hit, index) => ({
+			rank: index + 1,
+			url: hit.url,
+			status: "skipped",
+			durationMs: 0,
+		}));
 		let nextIndex = 0;
 		const worker = async (): Promise<void> => {
 			while (!signal.aborted) {
@@ -382,6 +493,7 @@ export function createGatewayService(
 				if (!hit) return;
 				const remaining = deadline - now();
 				if (remaining <= 0) return;
+				const itemStartedAt = now();
 				const itemTimeoutMs = Math.min(limits.contentItemTimeoutMs, remaining);
 				const itemTimeout = new AbortController();
 				const timer = setTimeout(
@@ -395,42 +507,118 @@ export function createGatewayService(
 							loaded: extractLoaded,
 							transport,
 							now,
+							debug: true,
 							signal: AbortSignal.any([signal, itemTimeout.signal]),
 							extractPreflight: preflight,
 						},
 					);
+					const itemDurationMs = Math.max(0, Math.round(now() - itemStartedAt));
+					const itemAttempts = extractAttempts(loaded, envelope);
 					// A late success that races the item deadline, the backfill budget
 					// or cancellation must not be written back; the core success path
 					// does not re-check cancellation after an await.
 					const document = successData<{
 						document: { content: string };
 					}>(envelope)?.document;
-					if (
+					const timedOut =
 						signal.aborted ||
 						itemTimeout.signal.aborted ||
 						clientSignal.aborted ||
-						now() >= deadline ||
-						!document
-					)
+						now() >= deadline;
+					if (timedOut || !document) {
+						const failure = failureOf(envelope);
+						const failedProvider =
+							lastAttemptProvider(failure) ??
+							(envelope.ok && "provider" in envelope
+								? envelope.provider
+								: undefined);
+						items[index] = {
+							rank: index + 1,
+							url: hit.url,
+							status: "failed",
+							durationMs: itemDurationMs,
+							...(failedProvider ? { provider: failedProvider } : {}),
+							errorCode: timedOut ? "timeout" : failure.code,
+							...(itemAttempts.length > 0 ? { attempts: itemAttempts } : {}),
+						};
 						continue;
+					}
 					const content = document.content;
 					contents[index] = content;
+					const provider =
+						envelope.ok && "provider" in envelope
+							? envelope.provider
+							: undefined;
+					items[index] = {
+						rank: index + 1,
+						url: hit.url,
+						status: "ok",
+						durationMs: itemDurationMs,
+						contentChars: Array.from(content).length,
+						...(provider ? { provider } : {}),
+						...(itemAttempts.length > 0 ? { attempts: itemAttempts } : {}),
+					};
 				} catch {
 					// Best-effort backfill: failures leave the content empty.
+					const itemDurationMs = Math.max(0, Math.round(now() - itemStartedAt));
+					items[index] = {
+						rank: index + 1,
+						url: hit.url,
+						status: "failed",
+						durationMs: itemDurationMs,
+						errorCode: "provider_error",
+					};
 				} finally {
 					clearTimeout(timer);
 				}
 			}
 		};
 		await Promise.all([worker(), worker()]);
-		return contents;
+		let attemptedCount = 0;
+		let succeededCount = 0;
+		let failedCount = 0;
+		let skippedCount = 0;
+		for (const item of items) {
+			if (item.status === "ok") {
+				attemptedCount += 1;
+				succeededCount += 1;
+			} else if (item.status === "failed") {
+				attemptedCount += 1;
+				failedCount += 1;
+			} else {
+				skippedCount += 1;
+			}
+		}
+		return {
+			contents,
+			summary: {
+				requestedCount: hits.length,
+				attemptedCount,
+				succeededCount,
+				failedCount,
+				skippedCount,
+				durationMs: Math.max(0, Math.round(now() - backfillStartedAt)),
+				items,
+			},
+		};
 	}
 
 	return {
-		readiness: () => readiness,
+		readiness: () => currentReadiness,
+		getLoaded: () => currentLoaded,
+		setLoaded(next: LoadedConfig): GatewayReadiness {
+			currentLoaded = next;
+			currentExtractLoaded = deriveExtractConfig(next, limits);
+			currentPreflight = preflightOverride(next, limits);
+			currentReadiness = checkGatewayReadiness(next);
+			return currentReadiness;
+		},
 
 		async search(request, clientSignal, observer) {
 			if (clientSignal.aborted) throw new GatewayClientAbort();
+			const loaded = currentLoaded;
+			const extractLoaded = currentExtractLoaded;
+			const preflight = currentPreflight;
 			const stageTimeoutMs = loaded.app.search.timeoutMs;
 			const deadline = now() + stageTimeoutMs;
 			const stageTimeout = new AbortController();
@@ -452,6 +640,7 @@ export function createGatewayService(
 						loaded,
 						transport,
 						now,
+						debug: true,
 						signal: AbortSignal.any([clientSignal, stageTimeout.signal]),
 					},
 				);
@@ -459,15 +648,48 @@ export function createGatewayService(
 				clearTimeout(stageTimer);
 			}
 			if (clientSignal.aborted) throw new GatewayClientAbort();
-			if (stageTimeout.signal.aborted || now() >= deadline)
-				throw timeoutError();
+			const searchAttempts = extractAttempts(loaded, envelope);
+			if (stageTimeout.signal.aborted || now() >= deadline) {
+				const err = timeoutError();
+				const provider = lastAttemptProvider(failureOf(envelope));
+				err.provider = provider;
+				err.trace = {
+					...(provider ? { provider } : {}),
+					attempts: searchAttempts,
+				};
+				throw err;
+			}
 			const data = successData<{ results: SearchHit[] }>(envelope);
-			if (!data) fail(envelope, "search");
-			if (envelope.ok && "provider" in envelope)
-				observer?.onSuccess?.({ provider: envelope.provider });
+			if (!data) fail(loaded, envelope, "search");
+			const provider =
+				envelope.ok && "provider" in envelope ? envelope.provider : "";
 			const hits = data.results;
 			const results = hits.map(mapHit);
-			if (!request.need_content || results.length === 0) return { results };
+			if (!request.need_content || results.length === 0) {
+				if (provider) {
+					observer?.onSuccess?.({
+						provider,
+						trace: {
+							provider,
+							attempts: searchAttempts,
+							...(request.need_content
+								? {
+										contentBackfill: {
+											requestedCount: 0,
+											attemptedCount: 0,
+											succeededCount: 0,
+											failedCount: 0,
+											skippedCount: 0,
+											durationMs: 0,
+											items: [],
+										},
+									}
+								: {}),
+						},
+					});
+				}
+				return { results };
+			}
 			if (clientSignal.aborted) throw new GatewayClientAbort();
 			const backfillDeadline = now() + limits.contentBudgetMs;
 			const backfillTimeout = new AbortController();
@@ -475,9 +697,15 @@ export function createGatewayService(
 				() => backfillTimeout.abort(),
 				Math.max(1, limits.contentBudgetMs),
 			);
-			let contents: string[];
+			let backfillResult: {
+				contents: string[];
+				summary: GatewayContentBackfillSummary;
+			};
 			try {
-				contents = await readContent(
+				backfillResult = await readContent(
+					loaded,
+					extractLoaded,
+					preflight,
 					hits,
 					clientSignal,
 					backfillDeadline,
@@ -490,12 +718,25 @@ export function createGatewayService(
 			// The search deadline is intentionally not a parent of the backfill
 			// budget; it must not expire the independent backfill window.
 			for (const [index, result] of results.entries())
-				result.content = contents[index] ?? "";
+				result.content = backfillResult.contents[index] ?? "";
+			if (provider) {
+				observer?.onSuccess?.({
+					provider,
+					trace: {
+						provider,
+						attempts: searchAttempts,
+						contentBackfill: backfillResult.summary,
+					},
+				});
+			}
 			return { results };
 		},
 
 		async fetch(request, clientSignal, observer) {
 			if (clientSignal.aborted) throw new GatewayClientAbort();
+			const loaded = currentLoaded;
+			const extractLoaded = currentExtractLoaded;
+			const preflight = currentPreflight;
 			const stageTimeoutMs = loaded.app.extract.timeoutMs;
 			const deadline = now() + stageTimeoutMs;
 			const stageTimeout = new AbortController();
@@ -511,6 +752,7 @@ export function createGatewayService(
 						loaded: extractLoaded,
 						transport,
 						now,
+						debug: true,
 						signal: AbortSignal.any([clientSignal, stageTimeout.signal]),
 						extractPreflight: preflight,
 					},
@@ -519,14 +761,30 @@ export function createGatewayService(
 				clearTimeout(stageTimer);
 			}
 			if (clientSignal.aborted) throw new GatewayClientAbort();
-			if (stageTimeout.signal.aborted || now() >= deadline)
-				throw timeoutError();
+			const fetchAttempts = extractAttempts(loaded, envelope);
+			if (stageTimeout.signal.aborted || now() >= deadline) {
+				const err = timeoutError();
+				const provider = lastAttemptProvider(failureOf(envelope));
+				err.provider = provider;
+				err.trace = {
+					...(provider ? { provider } : {}),
+					attempts: fetchAttempts,
+				};
+				throw err;
+			}
 			const document = successData<{
 				document: { title: string; content: string };
 			}>(envelope)?.document;
-			if (!document) fail(envelope, "extract");
-			if (envelope.ok && "provider" in envelope)
-				observer?.onSuccess?.({ provider: envelope.provider });
+			if (!document) fail(loaded, envelope, "extract");
+			if (envelope.ok && "provider" in envelope) {
+				observer?.onSuccess?.({
+					provider: envelope.provider,
+					trace: {
+						provider: envelope.provider,
+						attempts: fetchAttempts,
+					},
+				});
+			}
 			const response: GatewayFetchResponse = {
 				title: document.title ?? "",
 				content: document.content,

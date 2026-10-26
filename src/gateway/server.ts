@@ -14,11 +14,31 @@ import {
 import type { LoadedConfig } from "../config/config.ts";
 import type { HttpTransport } from "../transport/http.ts";
 import { VERSION } from "../version.ts";
-import { PANEL_PATH, RECORDS_PATH, renderPanelHtml } from "./panel.ts";
+import {
+	createGatewayAdminController,
+	type GatewayAdminController,
+	parseGatewayConfigUpdateRequest,
+} from "./admin.ts";
+import {
+	CONFIG_PATH,
+	CONFIG_RELOAD_PATH,
+	OVERVIEW_PATH,
+	PANEL_PATH,
+	RECORDS_PATH,
+	renderPanelHtml,
+	STATS_RESET_PATH,
+} from "./panel.ts";
 import {
 	createGatewayRecordStore,
+	createGatewayStatsTracker,
+	GATEWAY_RECORD_FETCH_PREVIEW_CHARS,
 	GATEWAY_RECORD_MAX_RESULTS,
+	GATEWAY_RECORD_SEARCH_PREVIEW_CHARS,
+	type GatewayAttemptRecord,
+	type GatewayContentBackfillSummary,
 	type GatewayRecordResult,
+	type GatewayRequestRecord,
+	truncatePreview,
 } from "./records.ts";
 import {
 	type GatewayFetchRequest,
@@ -72,6 +92,7 @@ export interface GatewayServerOptions {
 export interface GatewayServer {
 	server: Server;
 	service: GatewayService;
+	admin: GatewayAdminController;
 	/** Stop accepting new work, drain in-flight requests, then close. */
 	shutdown(timeoutMs: number): Promise<void>;
 }
@@ -307,6 +328,12 @@ export function createGatewayServer(
 	});
 	const expected = digest(options.apiKey);
 	const records = createGatewayRecordStore(options.recordLimit);
+	const stats = createGatewayStatsTracker();
+	const admin = createGatewayAdminController({
+		service,
+		stats,
+		retention: records.retention,
+	});
 	const log =
 		options.log ??
 		((event: GatewayLogEvent) =>
@@ -346,6 +373,11 @@ export function createGatewayServer(
 			title?: string;
 			resultCount?: number;
 			results?: GatewayRecordResult[];
+			contentPreview?: string;
+			contentChars?: number;
+			contentTruncated?: boolean;
+			attempts?: GatewayAttemptRecord[];
+			contentBackfill?: GatewayContentBackfillSummary;
 		} = {};
 		const clientAbort = new AbortController();
 		response.once("close", () => {
@@ -379,8 +411,20 @@ export function createGatewayServer(
 				summary.url = (parsed as GatewayFetchRequest).url;
 			}
 			const observer = {
-				onSuccess: (info: { provider: string }) => {
+				onSuccess: (info: {
+					provider: string;
+					trace: {
+						attempts: GatewayAttemptRecord[];
+						contentBackfill?: GatewayContentBackfillSummary;
+					};
+				}) => {
 					summary.provider = info.provider;
+					if (info.trace.attempts.length > 0) {
+						summary.attempts = info.trace.attempts;
+					}
+					if (info.trace.contentBackfill) {
+						summary.contentBackfill = info.trace.contentBackfill;
+					}
 				},
 			};
 			const body: unknown =
@@ -396,9 +440,37 @@ export function createGatewayServer(
 				summary.resultCount = searchBody.results.length;
 				summary.results = searchBody.results
 					.slice(0, GATEWAY_RECORD_MAX_RESULTS)
-					.map((result) => ({ title: result.title, url: result.url }));
+					.map((result, idx) => {
+						const preview = truncatePreview(
+							result.content,
+							GATEWAY_RECORD_SEARCH_PREVIEW_CHARS,
+						);
+						return {
+							rank: idx + 1,
+							title: result.title,
+							url: result.url,
+							...(result.snippet ? { snippet: result.snippet } : {}),
+							...(preview
+								? {
+										contentPreview: preview.preview,
+										contentChars: preview.chars,
+										contentTruncated: preview.truncated,
+									}
+								: {}),
+						};
+					});
 			} else {
-				summary.title = (body as GatewayFetchResponse).title;
+				const fetchBody = body as GatewayFetchResponse;
+				summary.title = fetchBody.title;
+				const preview = truncatePreview(
+					fetchBody.content,
+					GATEWAY_RECORD_FETCH_PREVIEW_CHARS,
+				);
+				if (preview !== undefined) {
+					summary.contentPreview = preview.preview;
+					summary.contentChars = preview.chars;
+					summary.contentTruncated = preview.truncated;
+				}
 			}
 			status = 200;
 			sendJson(response, 200, body);
@@ -423,6 +495,14 @@ export function createGatewayServer(
 			status = mapped.status;
 			code = mapped.code;
 			summary.provider = summary.provider ?? mapped.provider;
+			if (mapped.trace) {
+				if (!summary.attempts && mapped.trace.attempts.length > 0) {
+					summary.attempts = mapped.trace.attempts;
+				}
+				if (!summary.contentBackfill && mapped.trace.contentBackfill) {
+					summary.contentBackfill = mapped.trace.contentBackfill;
+				}
+			}
 			// A body read failure leaves the socket unusable for a follow-up request.
 			const closeConnection = error instanceof BodyAborted;
 			sendError(
@@ -445,16 +525,105 @@ export function createGatewayServer(
 			// authenticated tool requests are retained, so unauthenticated probes
 			// cannot flush the ring buffer and failed keys stay in stderr logs.
 			if (authenticated && !clientAborted) {
-				records.add({
+				const now = Date.now();
+				const record: GatewayRequestRecord = {
 					id: requestId,
-					at: Date.now(),
+					at: now,
 					route,
 					status,
 					durationMs,
 					...(code ? { code } : {}),
 					...summary,
+				};
+				records.add(record);
+				stats.recordRequest({
+					at: now,
+					route,
+					ok: status >= 200 && status < 300,
+					attempts: record.attempts,
+					contentBackfill: record.contentBackfill,
 				});
 			}
+		}
+	};
+
+	const handleAdminConfigUpdate = async (
+		request: IncomingMessage,
+		response: ServerResponse,
+	): Promise<void> => {
+		try {
+			if (shuttingDown) {
+				throw new GatewayHttpError({
+					status: 503,
+					type: "server_error",
+					code: "shutting_down",
+					message: "网关正在停止。",
+				});
+			}
+			if (!authenticate(request)) throw unauthorized();
+			if (!contentTypeIsJson(request.headers["content-type"])) {
+				throw invalidRequest("Content-Type 必须是 application/json。");
+			}
+			if (request.headers["content-encoding"] !== undefined) {
+				throw invalidRequest("不支持压缩请求体。");
+			}
+			const raw = await readJsonObject(request);
+			const patch = parseGatewayConfigUpdateRequest(raw);
+			const result = await admin.updateConfig(patch);
+			sendJson(response, 200, result);
+		} catch (error) {
+			const mapped: GatewayHttpError =
+				error instanceof GatewayValidationError
+					? invalidRequest(error.message)
+					: error instanceof BodyAborted
+						? invalidRequest("请求读取中断。")
+						: error instanceof GatewayHttpError
+							? error
+							: new GatewayHttpError({
+									status: 500,
+									type: "server_error",
+									code: "internal_error",
+									message: "网关内部错误。",
+								});
+			const closeConnection = error instanceof BodyAborted;
+			sendError(
+				response,
+				mapped,
+				closeConnection ? { Connection: "close" } : {},
+			);
+			if (closeConnection) request.destroy();
+		}
+	};
+
+	const handleAdminConfigReload = async (
+		request: IncomingMessage,
+		response: ServerResponse,
+	): Promise<void> => {
+		try {
+			if (shuttingDown) {
+				throw new GatewayHttpError({
+					status: 503,
+					type: "server_error",
+					code: "shutting_down",
+					message: "网关正在停止。",
+				});
+			}
+			if (!authenticate(request)) throw unauthorized();
+			const result = await admin.reloadConfig();
+			sendJson(response, 200, result);
+		} catch (error) {
+			const mapped: GatewayHttpError =
+				error instanceof GatewayValidationError
+					? invalidRequest(error.message)
+					: error instanceof GatewayHttpError
+						? error
+						: new GatewayHttpError({
+								status: 500,
+								type: "server_error",
+								code: "internal_error",
+								message: "网关内部错误。",
+							});
+			sendError(response, mapped);
 		}
 	};
 
@@ -498,13 +667,36 @@ export function createGatewayServer(
 			);
 			return;
 		}
-		if (path === RECORDS_PATH) {
+		if (path === OVERVIEW_PATH) {
 			if (request.method !== "GET") {
 				sendError(response, methodNotAllowed("GET"), { Allow: "GET" });
 				return;
 			}
 			if (!authenticate(request)) {
 				sendError(response, unauthorized());
+				return;
+			}
+			sendJson(response, 200, admin.getOverview());
+			return;
+		}
+		if (path === RECORDS_PATH) {
+			if (request.method !== "GET" && request.method !== "DELETE") {
+				sendError(response, methodNotAllowed("GET, DELETE"), {
+					Allow: "GET, DELETE",
+				});
+				return;
+			}
+			if (!authenticate(request)) {
+				sendError(response, unauthorized());
+				return;
+			}
+			if (request.method === "DELETE") {
+				const cleared = records.clear();
+				sendJson(response, 200, {
+					cleared,
+					retention: records.retention,
+					generatedAt: Date.now(),
+				});
 				return;
 			}
 			const queryIndex = url.indexOf("?");
@@ -526,13 +718,78 @@ export function createGatewayServer(
 				}
 				limit = Number(rawLimit);
 			}
-			const list = records.list(limit);
+			const rawRoute = params.get("route");
+			if (
+				rawRoute !== null &&
+				rawRoute !== "" &&
+				rawRoute !== "search" &&
+				rawRoute !== "fetch"
+			) {
+				sendError(response, invalidRequest("route 必须是 search 或 fetch。"));
+				return;
+			}
+			const rawStatus = params.get("status");
+			if (
+				rawStatus !== null &&
+				rawStatus !== "" &&
+				rawStatus !== "ok" &&
+				rawStatus !== "error"
+			) {
+				sendError(response, invalidRequest("status 必须是 ok 或 error。"));
+				return;
+			}
+			const rawProvider = params.get("provider") ?? undefined;
+			const rawQuery = params.get("q") ?? undefined;
+			const list = records.list({
+				limit,
+				...(rawRoute === "search" || rawRoute === "fetch"
+					? { route: rawRoute }
+					: {}),
+				...(rawStatus === "ok" || rawStatus === "error"
+					? { status: rawStatus }
+					: {}),
+				...(rawProvider ? { provider: rawProvider } : {}),
+				...(rawQuery ? { q: rawQuery } : {}),
+			});
 			sendJson(response, 200, {
 				records: list,
 				count: list.length,
 				retention: records.retention,
 				generatedAt: Date.now(),
 			});
+			return;
+		}
+		if (path === STATS_RESET_PATH) {
+			if (request.method !== "POST") {
+				sendError(response, methodNotAllowed("POST"), { Allow: "POST" });
+				return;
+			}
+			if (!authenticate(request)) {
+				sendError(response, unauthorized());
+				return;
+			}
+			stats.reset();
+			sendJson(response, 200, {
+				reset: true,
+				stats: stats.snapshot(),
+				generatedAt: Date.now(),
+			});
+			return;
+		}
+		if (path === CONFIG_PATH) {
+			if (request.method !== "PUT") {
+				sendError(response, methodNotAllowed("PUT"), { Allow: "PUT" });
+				return;
+			}
+			void handleAdminConfigUpdate(request, response);
+			return;
+		}
+		if (path === CONFIG_RELOAD_PATH) {
+			if (request.method !== "POST") {
+				sendError(response, methodNotAllowed("POST"), { Allow: "POST" });
+				return;
+			}
+			void handleAdminConfigReload(request, response);
 			return;
 		}
 		if (path === "/v1/tools/search" || path === "/v1/tools/fetch") {
@@ -553,6 +810,7 @@ export function createGatewayServer(
 	return {
 		server,
 		service,
+		admin,
 		async shutdown(timeoutMs) {
 			shuttingDown = true;
 			const drained = new Promise<void>((resolveDrained) => {

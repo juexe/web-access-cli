@@ -22,8 +22,13 @@ deploy/
 | --- | --- | --- |
 | `POST` | `/v1/tools/search` | DeepSeek Search 兼容 |
 | `POST` | `/v1/tools/fetch` | DeepSeek Fetch 兼容 |
-| `GET` | `/`、`/panel` | 请求记录面板（HTML，无需鉴权，页面本身不含数据） |
-| `GET` | `/admin/api/records` | 最近请求记录 JSON（需要 Bearer Key） |
+| `GET` | `/`、`/panel` | 网关管理后台（HTML，无需鉴权，页面本身不含数据） |
+| `GET` | `/admin/api/records` | 最近请求记录 JSON（支持 `limit/route/status/provider/q` 筛选，需 Bearer Key） |
+| `DELETE` | `/admin/api/records` | 清空内存请求记录（需 Bearer Key） |
+| `GET` | `/admin/api/overview` | 网关运行状态、Doctor 诊断、路由与 Provider 统计（需 Bearer Key） |
+| `POST` | `/admin/api/stats/reset` | 重置 Provider 运行时累计统计（需 Bearer Key） |
+| `PUT` | `/admin/api/config` | 在线更新路由、超时参数与 Provider 配置并热切换（需 Bearer Key） |
+| `POST` | `/admin/api/config/reload` | 从磁盘重新加载配置文件并热切换（需 Bearer Key） |
 | `GET` | `/healthz` | 进程存活，无需鉴权 |
 | `GET` | `/readyz` | 配置/生命周期就绪，无需鉴权 |
 
@@ -69,7 +74,7 @@ deploy/
 - 不保证结果数量（可能少于 `count`）、排序或摘要质量与官方一致；不重新分页，也不跨 provider 凑数。
 - `ori_question` 与 `localization` 会被接受并校验，但当前中立核心没有对应能力，**不会**影响 provider 请求，也不会拼进 `query`。
 - `count` 接受 1–50；CLI 与配置文件的 limit 上限仍是 20。各 provider 还会按上游能力进一步限制出站数量（Tavily 20、Brave 20、AnySearch 10、元宝搜索按 10 向上取整且上限 50、XCrawl 带域名过滤时 `max(20, count)`）。
-- 网关不写回 provider 顺序：服务运行期间使用启动时加载的配置快照，重启后才会读取磁盘上的新顺序。
+- 工具请求不自动改写 provider 顺序：并发搜索/抓取不会触发配置写回；管理员可通过后台「配置管理」或 `/admin/api/config*` 手动调整路由、保存写回或从磁盘热重载。
 
 ## 正文补抓
 
@@ -131,16 +136,19 @@ curl -sS -X POST http://192.168.3.3:18180/v1/tools/search \
 
 `deploy/compose.yaml` 默认把端口发布到 `127.0.0.1:18180`，此时只能从宿主机访问。需要从局域网访问时，把 `WEB_ACCESS_BIND` 设为 `192.168.3.3:18180`（只写端口部分，容器内端口固定为 8080）。
 
-## 请求记录面板
+## 网关管理后台
 
-浏览器打开 `http://192.168.3.3:18180/panel`（或直接打开 `/`），输入网关 API Key 即可查看最近的工具请求。页面每 3 秒自动刷新，可按搜索/抓取、成功/失败和文本筛选。
+浏览器打开 `http://192.168.3.3:18180/panel`（或直接打开 `/`），输入网关 API Key 即可使用管理后台。后台包含三个工作区：
 
-- 只保留最近 500 条，进程或容器重启后清空；记录只在内存中，不写磁盘，因此 `read_only` 容器不需要额外卷。
-- 每条记录包含时间、route、HTTP 状态、耗时、错误码、最终成功的 provider（失败时为最后一个实际失败的 provider）、搜索 `query` 或 Fetch URL、`count`/`need_content`、结果条数，以及前 5 条结果的标题和 URL。
-- 不记录响应正文、请求/响应 header 或凭据。只有通过鉴权的工具请求才进入面板；401 等未鉴权请求只写入容器 stderr 日志，避免探测流量冲刷记录。
-- 面板 HTML 本身是公开的静态页面，不含数据；`/admin/api/records` 与工具接口使用同一个 Bearer Key。Key 由浏览器保存在当前标签页的 `sessionStorage`，不进入 URL、不写 Cookie。
-- 可以直接用书签链接 `http://192.168.3.3:18180/panel#apikey=<key>` 打开：Key 放在 fragment 中，不会发送给服务器，也不出现在 `Referer`；脚本读到后会立刻从地址栏和历史记录中移除它，并写入 sessionStorage。**不要用 `?apikey=`**，查询串会进入服务器日志、代理日志和浏览器历史。
-- 记录包含 `query` 与 URL，属于敏感信息；能拿到网关 Key 的人都能读取，与调用搜索接口的信任边界一致。不要把面板或 Key 暴露到可信内网之外。
+1. **请求记录**：实时查看最近 500 条已鉴权工具请求，支持按能力、状态、Provider（含回退链路与补抓链路）及关键词筛选；展开可查看完整 Provider 尝试链（`attempts`）、`need_content` 补抓明细、搜索结果摘要（`snippet`）以及截断后的 Markdown 正文预览（`contentPreview`），支持一键复制、导出 JSON 与清空记录。
+2. **路由与统计**：展示网关运行健康度、`doctor` 本地诊断、Search/Extract 主备路由拓扑，以及各 Provider 实例的配置来源与运行时累计调用次数、成功率、平均耗时和错误码分布（支持重置统计）。
+3. **配置管理**：可视化编排 Search/Extract 主轮与 fallback 顺序、调整超时与阈值参数、新增/编辑/删除 Provider 实例（密码框留空保持原密钥不变，从不回传明文 Key）。点击「保存并应用」时先校验路由就绪，再尝试原子写入或原地覆写配置文件；若容器以只读 secret 挂载配置文件，修改仍会在当前进程内存中立即生效并给出只读提示，也支持随时「从磁盘重载」。
+
+安全与存储说明：
+
+- 请求记录与累计统计保存在内存中，进程或容器重启后清空；未鉴权探测（401）只写入 stderr 日志，不会冲刷面板记录。
+- 面板 HTML 本身是公开静态页面，不含业务数据；所有 `/admin/api/*` 接口均复用网关 Bearer Key，且响应绝不包含任何 Provider API Key 明文。
+- 可以直接用书签链接 `http://192.168.3.3:18180/panel#apikey=<key>` 打开：Key 放在 fragment 中，不会发送给服务器，也不出现在 `Referer`；脚本读到后会立刻从地址栏和历史记录中移除它，并写入 `sessionStorage`。**不要用 `?apikey=`**，查询串会进入服务器日志、代理日志和浏览器历史。
 
 ## 环境变量
 

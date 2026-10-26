@@ -281,6 +281,13 @@ try {
 				record.route === "fetch" && record.title === "Fixture Article",
 		),
 	);
+	const overviewResponse = await fetch(`${baseUrl}/admin/api/overview`, {
+		headers: { Authorization: `Bearer ${gatewayKey}` },
+	});
+	assert.equal(overviewResponse.status, 200);
+	const overviewBody = await overviewResponse.json();
+	assert.equal(overviewBody.doctor?.ok, true);
+	assert.ok(Array.isArray(overviewBody.providers));
 
 	// Restart the gateway alone and verify recovery.
 	const restart = await compose(["restart", "gateway"], { inherit: true });
