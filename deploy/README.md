@@ -39,7 +39,7 @@ deploy/
   "query": "DeepSeek V4",
   "count": 10,
   "ori_question": "DeepSeek V4 有什么更新",
-  "localization": "192.168.3.3",
+  "localization": "192.168.1.10",
   "need_content": false
 }
 ```
@@ -128,17 +128,17 @@ docker compose -f deploy/compose.yaml --env-file personal/deploy.env up -d --wai
 请求示例：
 
 ```sh
-curl -sS -X POST http://192.168.3.3:18180/v1/tools/search \
+curl -sS -X POST http://192.168.1.10:18180/v1/tools/search \
   -H "Authorization: Bearer $(cat personal/secrets/gateway-api-key)" \
   -H "Content-Type: application/json" \
   -d '{"query":"example","count":3}'
 ```
 
-`deploy/compose.yaml` 默认把端口发布到 `127.0.0.1:18180`，此时只能从宿主机访问。需要从局域网访问时，把 `WEB_ACCESS_BIND` 设为 `192.168.3.3:18180`（只写端口部分，容器内端口固定为 8080）。
+`deploy/compose.yaml` 默认把端口发布到 `127.0.0.1:18180`，此时只能从宿主机访问。需要从局域网访问时，把 `WEB_ACCESS_BIND` 设为 `192.168.1.10:18180`（只写端口部分，容器内端口固定为 8080）。
 
 ## 网关管理后台
 
-浏览器打开 `http://192.168.3.3:18180/panel`（或直接打开 `/`），输入网关 API Key 即可使用管理后台。后台包含三个工作区：
+浏览器打开 `http://192.168.1.10:18180/panel`（或直接打开 `/`），输入网关 API Key 即可使用管理后台。后台包含三个工作区：
 
 1. **请求记录**：实时查看最近 500 条已鉴权工具请求，支持按能力、状态、Provider（含回退链路与补抓链路）及关键词筛选；展开可查看完整 Provider 尝试链（`attempts`）、`need_content` 补抓明细、搜索结果摘要（`snippet`）以及截断后的 Markdown 正文预览（`contentPreview`），支持一键复制、导出 JSON 与清空记录。
 2. **路由与统计**：展示网关运行健康度、`doctor` 本地诊断、Search/Extract 主备路由拓扑，以及各 Provider 实例的配置来源与运行时累计调用次数、成功率、平均耗时和错误码分布（支持重置统计）。
@@ -148,7 +148,7 @@ curl -sS -X POST http://192.168.3.3:18180/v1/tools/search \
 
 - 请求记录与累计统计保存在内存中，进程或容器重启后清空；未鉴权探测（401）只写入 stderr 日志，不会冲刷面板记录。
 - 面板 HTML 本身是公开静态页面，不含业务数据；所有 `/admin/api/*` 接口均复用网关 Bearer Key，且响应绝不包含任何 Provider API Key 明文。
-- 可以直接用书签链接 `http://192.168.3.3:18180/panel#apikey=<key>` 打开：Key 放在 fragment 中，不会发送给服务器，也不出现在 `Referer`；脚本读到后会立刻从地址栏和历史记录中移除它，并写入 `sessionStorage`。**不要用 `?apikey=`**，查询串会进入服务器日志、代理日志和浏览器历史。
+- 可以直接用书签链接 `http://192.168.1.10:18180/panel#apikey=<key>` 打开：Key 放在 fragment 中，不会发送给服务器，也不出现在 `Referer`；脚本读到后会立刻从地址栏和历史记录中移除它，并写入 `sessionStorage`。**不要用 `?apikey=`**，查询串会进入服务器日志、代理日志和浏览器历史。
 
 ## 环境变量
 
@@ -178,12 +178,12 @@ curl -sS -X POST http://192.168.3.3:18180/v1/tools/search \
 
 ```sh
 # 存活与就绪
-curl -fsS http://192.168.3.3:18180/healthz
-curl -fsS http://192.168.3.3:18180/readyz
+curl -fsS http://192.168.1.10:18180/healthz
+curl -fsS http://192.168.1.10:18180/readyz
 
 # 无 Key 必须返回 401
 curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
-  http://192.168.3.3:18180/v1/tools/search \
+  http://192.168.1.10:18180/v1/tools/search \
   -H 'Content-Type: application/json' -d '{"query":"x"}'
 
 # 容器状态与日志中的错误码

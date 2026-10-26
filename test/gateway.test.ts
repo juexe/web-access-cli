@@ -82,7 +82,7 @@ test("Search 请求校验官方字段、默认值与未知字段忽略", () => {
 			query: "hello",
 			count: 50,
 			ori_question: "原始问题",
-			localization: "192.168.3.3",
+			localization: "192.168.1.10",
 			need_content: true,
 			provider: "tavily",
 			timeout: 1,
@@ -92,7 +92,7 @@ test("Search 请求校验官方字段、默认值与未知字段忽略", () => {
 			query: "hello",
 			count: 50,
 			ori_question: "原始问题",
-			localization: "192.168.3.3",
+			localization: "192.168.1.10",
 			need_content: true,
 		},
 	);
@@ -141,8 +141,8 @@ test("Fetch 请求只接受含 host 的绝对 HTTP(S) URL", () => {
 		"https://example.com/a?b=1#c",
 	);
 	assert.equal(
-		parseGatewayFetchRequest({ url: "http://192.168.3.3:18180/x" }).url,
-		"http://192.168.3.3:18180/x",
+		parseGatewayFetchRequest({ url: "http://192.168.1.10:18180/x" }).url,
+		"http://192.168.1.10:18180/x",
 	);
 	for (const url of [
 		"",
@@ -949,14 +949,14 @@ test("Fetch 允许内网 URL 与短正文", async () => {
 	try {
 		const transport = new MockTransport((url) => {
 			if (url.endsWith(".md")) return response("missing", { status: 404 });
-			assert.equal(url, "http://192.168.3.3:18180/healthz");
+			assert.equal(url, "http://192.168.1.10:18180/healthz");
 			return response("ok", { contentType: "text/plain; charset=utf-8" });
 		});
 		const service = createGatewayService(
 			serviceOptions(fixture.loaded, transport),
 		);
 		const body = await service.fetch(
-			parseGatewayFetchRequest({ url: "http://192.168.3.3:18180/healthz" }),
+			parseGatewayFetchRequest({ url: "http://192.168.1.10:18180/healthz" }),
 			new AbortController().signal,
 		);
 		assert.deepEqual(body, { title: "", content: "ok" });
