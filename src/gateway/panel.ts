@@ -945,6 +945,8 @@ main {
 		dirty: false,
 		editingProviderId: null,
 		editingIsNew: false,
+		expandedIds: new Set(),
+		expandedPreviews: new Set(),
 	};
 
 	function readStoredKey() {
@@ -1100,10 +1102,23 @@ main {
 		return row;
 	}
 
-	function renderRecord(record) {
+	function recordKey(record, fallbackIdx) {
+		if (record && record.id) return String(record.id);
+		return (
+			String(record.at || "") +
+			":" +
+			String(record.route || "") +
+			":" +
+			String(record.query || record.url || record.title || fallbackIdx || "")
+		);
+	}
+
+	function renderRecord(record, recKey) {
 		const kind = statusKind(record.status);
-		const item = element("li", "record");
+		const isExpanded = state.expandedIds.has(recKey);
+		const item = element("li", "record" + (isExpanded ? " expanded" : ""));
 		item.dataset.status = kind;
+		item.dataset.recordKey = recKey;
 
 		const summaryText =
 			record.query ||
@@ -1117,7 +1132,7 @@ main {
 
 		const head = element("button", "record-head");
 		head.type = "button";
-		head.setAttribute("aria-expanded", "false");
+		head.setAttribute("aria-expanded", String(isExpanded));
 		head.append(
 			element("span", "record-time", formatTime(record.at)),
 			element("span", "badge route-" + record.route, routeLabel(record.route)),
@@ -1144,7 +1159,7 @@ main {
 		head.append(chevron);
 
 		const detail = element("div", "record-detail");
-		detail.hidden = true;
+		detail.hidden = !isExpanded;
 		const meta = element("dl", "record-meta");
 		appendMeta(meta, "请求 ID", record.id || "—");
 		appendMeta(meta, "时间", formatTime(record.at));
@@ -1223,7 +1238,7 @@ main {
 		if (results.length > 0) {
 			detail.append(element("div", "detail-label", "搜索结果列表（共 " + results.length + " 条）"));
 			const list = element("ol", "result-list");
-			for (const result of results) {
+			results.forEach((result, rIdx) => {
 				const row = element("li", "result-item");
 				const href = safeHref(result.url);
 				if (href) {
@@ -1240,7 +1255,15 @@ main {
 					row.append(element("p", "result-snippet", result.snippet));
 				}
 				if (result.contentPreview) {
+					const previewKey = recKey + "#r" + rIdx;
 					const detailsNode = element("details", "result-preview-details");
+					if (state.expandedPreviews.has(previewKey)) {
+						detailsNode.open = true;
+					}
+					detailsNode.addEventListener("toggle", () => {
+						if (detailsNode.open) state.expandedPreviews.add(previewKey);
+						else state.expandedPreviews.delete(previewKey);
+					});
 					const sumText = "查看补抓正文预览" + (result.contentChars ? " (" + result.contentChars + " 字符" + (result.contentTruncated ? "，已截断" : "") + ")" : "");
 					detailsNode.append(element("summary", null, sumText));
 					const box = element("div", "content-preview-box");
@@ -1249,15 +1272,18 @@ main {
 					row.append(detailsNode);
 				}
 				list.append(row);
-			}
+			});
 			detail.append(list);
 		}
 
 		head.addEventListener("click", () => {
 			const expanded = head.getAttribute("aria-expanded") === "true";
-			head.setAttribute("aria-expanded", String(!expanded));
-			detail.hidden = expanded;
-			item.classList.toggle("expanded", !expanded);
+			const next = !expanded;
+			head.setAttribute("aria-expanded", String(next));
+			detail.hidden = !next;
+			item.classList.toggle("expanded", next);
+			if (next) state.expandedIds.add(recKey);
+			else state.expandedIds.delete(recKey);
 		});
 		item.append(head, detail);
 		return item;
@@ -1299,6 +1325,15 @@ main {
 			}
 		}
 		const sorted = Array.from(names).sort();
+		const currentValues = Array.from(select.options).map((o) => o.value);
+		const nextValues = ["", ...sorted];
+		const sameOptions =
+			currentValues.length === nextValues.length &&
+			currentValues.every((val, i) => val === nextValues[i]);
+		if (sameOptions) {
+			if (select.value !== prev) select.value = prev;
+			return;
+		}
 		select.replaceChildren(element("option", null, "全部 Provider"));
 		select.firstChild.value = "";
 		for (const id of sorted) {
@@ -1332,9 +1367,41 @@ main {
 		renderStats();
 		updateProviderFilterDropdown();
 		const list = byId("records");
-		list.replaceChildren();
 		const visible = state.records.filter(matches);
-		for (const record of visible) list.append(renderRecord(record));
+		const existingNodes = new Map();
+		for (const child of Array.from(list.children)) {
+			const k = child.dataset && child.dataset.recordKey;
+			if (k) existingNodes.set(k, child);
+		}
+		const keepKeys = new Set();
+		const nextNodes = visible.map((record, idx) => {
+			const k = recordKey(record, idx);
+			keepKeys.add(k);
+			const existing = existingNodes.get(k);
+			if (existing) {
+				const isExp = state.expandedIds.has(k);
+				existing.classList.toggle("expanded", isExp);
+				const h = existing.querySelector(".record-head");
+				const d = existing.querySelector(".record-detail");
+				if (h) h.setAttribute("aria-expanded", String(isExp));
+				if (d) d.hidden = !isExp;
+				return existing;
+			}
+			return renderRecord(record, k);
+		});
+		for (const child of Array.from(list.children)) {
+			const k = child.dataset && child.dataset.recordKey;
+			if (!k || !keepKeys.has(k)) {
+				child.remove();
+			}
+		}
+		for (let i = 0; i < nextNodes.length; i += 1) {
+			const node = nextNodes[i];
+			const currentAtIdx = list.children[i];
+			if (currentAtIdx !== node) {
+				list.insertBefore(node, currentAtIdx || null);
+			}
+		}
 		byId("empty").hidden = visible.length > 0;
 		if (visible.length === 0) {
 			byId("empty-title").textContent = state.records.length > 0 ? "没有匹配的记录" : "还没有请求记录";
@@ -2005,6 +2072,8 @@ main {
 			}
 			if (response.ok) {
 				state.records = [];
+				state.expandedIds.clear();
+				state.expandedPreviews.clear();
 				renderRecordsTab();
 			}
 		} finally {
@@ -2107,11 +2176,11 @@ main {
 		}
 	}
 
-	async function load() {
+	async function load(manual = false) {
 		if (!state.key || state.loading) return;
 		state.loading = true;
 		const button = byId("refresh");
-		button.disabled = true;
+		if (manual) button.disabled = true;
 		try {
 			const response = await fetch("/admin/api/records?limit=" + RETENTION, {
 				headers: { Authorization: "Bearer " + state.key },
@@ -2133,7 +2202,7 @@ main {
 			showBanner("读取请求记录失败：" + detail + "。面板会继续自动重试。");
 		} finally {
 			state.loading = false;
-			button.disabled = false;
+			if (manual) button.disabled = false;
 		}
 	}
 
@@ -2162,6 +2231,8 @@ main {
 		clearStoredKey();
 		state.key = "";
 		state.records = [];
+		state.expandedIds.clear();
+		state.expandedPreviews.clear();
 		state.overview = null;
 		state.draft = null;
 		renderRecordsTab();
@@ -2214,6 +2285,8 @@ main {
 		clearStoredKey();
 		state.key = "";
 		state.records = [];
+		state.expandedIds.clear();
+		state.expandedPreviews.clear();
 		state.overview = null;
 		state.draft = null;
 		state.text = "";
@@ -2225,7 +2298,7 @@ main {
 	function bind() {
 		byId("login-form").addEventListener("submit", (event) => void onLogin(event));
 		byId("logout").addEventListener("click", logout);
-		byId("refresh").addEventListener("click", () => void load());
+		byId("refresh").addEventListener("click", () => void load(true));
 		byId("export-records").addEventListener("click", exportRecordsJson);
 		byId("clear-records").addEventListener("click", () => void clearRecords());
 		byId("auto-refresh").addEventListener("change", schedule);

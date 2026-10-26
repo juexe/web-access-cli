@@ -850,3 +850,139 @@ test("管理后台 overview 与在线配置更新支持持久化写回、只读�
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
+
+test("面板刷新时保留已展开的记录行状态与 DOM 节点", async (_t) => {
+	const { parseHTML } = await import("linkedom");
+	const vm = await import("node:vm");
+	const { MockTransport } = await import("./helpers.ts");
+	const server = await startServer({
+		transport: new MockTransport((url) =>
+			response({
+				web: {
+					results: [
+						{
+							title: `Hit for ${url}`,
+							url: "https://example.com/item",
+							description: "snippet text",
+						},
+					],
+				},
+			}),
+		),
+	});
+	try {
+		await search(
+			server.url,
+			{ query: "first query", count: 1 },
+			authHeaders(),
+			"req-first",
+		);
+		const pageRes = await request(`${server.url}/panel`);
+		const html = await pageRes.body.text();
+		const scriptMatch = html.match(
+			/<script nonce="[^"]+">([\s\S]*?)<\/script>/,
+		);
+		assert.ok(scriptMatch?.[1]);
+
+		const dom = parseHTML(html);
+		const storage = new Map<string, string>([
+			["web-access-gateway-key", API_KEY],
+		]);
+		const intervals: Array<() => void> = [];
+		const context = vm.createContext({
+			document: dom.document,
+			window: dom.window,
+			location: {
+				hash: "",
+				pathname: "/panel",
+				search: "",
+			},
+			history: {
+				replaceState() {},
+			},
+			sessionStorage: {
+				getItem: (k: string) => storage.get(k) ?? null,
+				setItem: (k: string, v: string) => storage.set(k, v),
+				removeItem: (k: string) => storage.delete(k),
+			},
+			navigator: {
+				clipboard: {
+					writeText: async () => {},
+				},
+			},
+			URL,
+			URLSearchParams,
+			Blob,
+			setInterval: (fn: () => void) => {
+				intervals.push(fn);
+				return intervals.length;
+			},
+			clearInterval: () => {},
+			setTimeout,
+			clearTimeout,
+			fetch: async (target: string, init?: RequestInit) => {
+				const res = await fetch(`${server.url}${target}`, init);
+				return res;
+			},
+		});
+
+		vm.runInContext(scriptMatch[1], context);
+		// Wait for initial boot load() to settle
+		for (let i = 0; i < 20; i += 1) {
+			const list = dom.document.getElementById("records");
+			if (list && list.children.length > 0) break;
+			await new Promise((r) => setTimeout(r, 25));
+		}
+
+		const recordsList = dom.document.getElementById("records");
+		assert.ok(recordsList);
+		assert.equal(recordsList.children.length, 1);
+
+		const firstRow = recordsList.children[0] as HTMLElement;
+		const headBtn = firstRow.querySelector(".record-head") as HTMLElement;
+		const detailDiv = firstRow.querySelector(".record-detail") as HTMLElement;
+		assert.equal(headBtn.getAttribute("aria-expanded"), "false");
+		assert.equal(detailDiv.hidden, true);
+
+		// Click to expand the first row
+		headBtn.click();
+		assert.equal(headBtn.getAttribute("aria-expanded"), "true");
+		assert.equal(detailDiv.hidden, false);
+		assert.equal(firstRow.classList.contains("expanded"), true);
+
+		// Add a second search request, then trigger refresh
+		await search(
+			server.url,
+			{ query: "second query", count: 1 },
+			authHeaders(),
+			"req-second",
+		);
+		(dom.document.getElementById("refresh") as HTMLElement).click();
+
+		for (let i = 0; i < 20; i += 1) {
+			if (Number(recordsList.children.length) === 2) break;
+			await new Promise((r) => setTimeout(r, 25));
+		}
+		assert.equal(Number(recordsList.children.length), 2);
+
+		// Newest row is at index 0 (collapsed), previously expanded row is at index 1 and still expanded + same DOM node
+		const newestRow = recordsList.children[0] as HTMLElement;
+		const preservedRow = recordsList.children[1] as HTMLElement;
+		assert.equal(
+			newestRow.querySelector(".record-head")?.getAttribute("aria-expanded"),
+			"false",
+		);
+		assert.equal(preservedRow, firstRow);
+		assert.equal(
+			preservedRow.querySelector(".record-head")?.getAttribute("aria-expanded"),
+			"true",
+		);
+		assert.equal(
+			(preservedRow.querySelector(".record-detail") as HTMLElement).hidden,
+			false,
+		);
+		assert.equal(preservedRow.classList.contains("expanded"), true);
+	} finally {
+		await server.close();
+	}
+});
